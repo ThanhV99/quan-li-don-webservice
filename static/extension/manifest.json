@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Quản lí đơn – TikTok còn hàng + tra GHN",
+  "version": "1.2",
+  "description": "Bấm nút trên web quản lí đơn: mở từng link TikTok Shop (đọc số còn hàng) hoặc trang tra cứu GHN (đọc hành trình, bạn tự giải captcha) trong Chrome này rồi gửi kết quả về web.",
+  "permissions": [
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.tiktok.com/*",
+    "https://donhang.ghn.vn/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "__WEB_MATCH__"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://donhang.ghn.vn/*"
+      ],
+      "js": [
+        "ghn_hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://donhang.ghn.vn/*"
+      ],
+      "js": [
+        "ghn_content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}

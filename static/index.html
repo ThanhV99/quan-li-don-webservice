@@ -1,0 +1,2374 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quản lí đơn</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
+<style>
+/* màu nhấn = tím mực dấu mộc; 5 màu trạng thái giữ riêng (vàng Đã đặt, xanh ngọc Đã nhận, xanh Thanh toán, lục Hoàn thành, đỏ Hủy) */
+:root {
+  --bg: #eceee9; --card: #fff; --text: #1a1f2b; --muted: #656c7a; --line: #dcdfd8;
+  --accent: #5b3cc4; --accent-soft: #ece7fa; --on-accent: #fff; --ok: #1e8e4e; --ok-soft: #e1f3e8;
+  --warn: #b26a00; --warn-soft: #fbf0d9; --bad: #c8323f; --bad-soft: #fbe5e7;
+  --blue: #1f6fd1; --blue-soft: #e2eefc; --shadow: 0 1px 0 rgba(26,31,43,.04); --gray-card: #e2e4df;
+  --teal: #0b7f7a; --teal-soft: #dcf1ef;
+  --radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171c; --card: #1f2229; --text: #e9eaee; --muted: #959baa; --line: #31353f;
+    --accent: #a993f5; --accent-soft: #2b2442; --on-accent: #17122b; --ok: #4fc78a; --ok-soft: #1a3227;
+    --warn: #f0b44a; --warn-soft: #382c16; --bad: #f2707f; --bad-soft: #3b1f25;
+    --blue: #6ea8ff; --blue-soft: #1c2a42; --shadow: none; --gray-card: #2b2e35;
+    --teal: #4cc9bf; --teal-soft: #163330;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.kpi .value, .money-row b, .st-tile b, td.r, .pickbar .nums b, .order .id { font-variant-numeric: tabular-nums; }
+button, input, select, textarea { font: inherit; color: inherit; }
+.hidden { display: none !important; }
+
+header { position: sticky; top: 0; z-index: 10; background: var(--card); border-bottom: 1px solid var(--line); }
+.bar { max-width: 1180px; margin: 0 auto; display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
+.brand { font-weight: 700; font-size: 17px; white-space: nowrap; }
+nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; flex: 1; }
+nav::-webkit-scrollbar { display: none; }
+nav a { border: 0; background: none; padding: 8px 12px; border-radius: 10px; cursor: pointer;
+  color: var(--muted); white-space: nowrap; font-weight: 500; text-decoration: none; }
+nav a.on { background: var(--accent-soft); color: var(--accent); }
+main { max-width: 1180px; margin: 0 auto; padding: 16px 16px 80px; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+.toolbar .grow { flex: 1; min-width: 160px; }
+.date-range { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.date-box { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+.date-box .input { width: 112px; padding: 6px 8px; text-align: center; }
+.date-box .picker { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.input, select.input, textarea.input { width: 100%; padding: 9px 12px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--card); outline: none; }
+.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+textarea.input { min-height: 90px; resize: vertical; }
+.phone-sug { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+tr.sku-on td { background: var(--ok-soft); font-weight: 600; }
+.chip-btn { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 9px;
+  font-size: 13px; cursor: pointer; text-align: left; }
+.chip-btn:hover { border-color: var(--accent); }
+.chip-btn.on { border-color: var(--accent); background: var(--accent-soft); }
+/* sửa địa chỉ: ô nhập to, modal rộng hơn (địa chỉ dài nhiều dòng) */
+.modal:has(.addr-form) { max-width: 820px; }
+.addr-form textarea.input { min-height: 60vh; line-height: 1.5; }
+.addr-card { display: flex; flex-direction: column; gap: 10px; }
+.addr-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.addr-card .actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.addr-card .actions .muted { margin-right: auto; font-size: 12px; }
+.input::placeholder { color: var(--muted); opacity: .55; font-style: italic; }
+.input[readonly] { background: var(--bg); border-style: dashed; font-weight: 700; cursor: default; }
+.btn { border: 1px solid var(--line); background: var(--card); padding: 8px 14px; border-radius: 10px;
+  cursor: pointer; font-weight: 500; white-space: nowrap; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
+.btn.bad { color: var(--bad); }
+.btn.sm { padding: 4px 10px; font-size: 13px; border-radius: 8px; }
+.seg { display: flex; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 3px; overflow-x: auto; }
+.seg button { border: 0; background: none; padding: 6px 11px; border-radius: 8px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+.seg button.on { background: var(--accent); color: var(--on-accent); }
+.seg .n { opacity: .75; font-size: 12px; margin-left: 3px; }
+
+.grid { display: grid; gap: 12px; }
+.kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.cards { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
+.card h3 { margin: 0 0 10px; font-size: 15px; }
+.kpi .label { color: var(--muted); font-size: 13px; }
+.kpi .value { font-size: 28px; font-weight: 800; margin-top: 2px; letter-spacing: -.6px; line-height: 1.2; }
+.kpi .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.split { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }
+.split-row { display: grid; grid-template-columns: 1fr auto 38px; gap: 8px; align-items: baseline; font-size: 13px; }
+.split-row .muted { text-align: right; font-size: 12px; }
+.split-row i { grid-column: 1 / -1; height: 5px; border-radius: 99px; margin-top: -4px; }
+.split-row.click { cursor: pointer; }
+@media (max-width: 640px) { .kpi.wide { grid-column: 1 / -1; } }
+.st-bar { display: flex; gap: 2px; height: 8px; border-radius: 99px; overflow: hidden; margin: 10px 0 8px; }
+.st-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.st-tile { border-radius: 10px; padding: 6px 10px; cursor: pointer; display: flex; justify-content: space-between;
+  align-items: center; gap: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.st-tile b { font-size: 18px; }
+.st-tile.zero { opacity: .45; }
+/* công thức: kẻ đứt như dòng cộng trên hóa đơn */
+.formula { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); color: var(--muted);
+  font-size: 12px; line-height: 1.6; }
+.formula b { color: var(--text); font-weight: 600; }
+.muted { color: var(--muted); font-size: 13px; }
+.san { display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.san-head { display: grid; grid-template-columns: 92px 1fr auto; align-items: center; gap: 10px; }
+.san-bar { display: flex; height: 10px; border-radius: 99px; overflow: hidden; background: var(--bg); gap: 2px; }
+.san-bar i { display: block; }
+.san-bar .ok { background: var(--ok); } .san-bar .wait { background: var(--warn); } .san-bar .fail { background: var(--bad); }
+.san-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; padding-left: 102px; }
+.san-tag { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.san-tag img { width: 18px; height: 18px; flex: none; }
+/* logo đơn vị vận chuyển: nhãn nền trắng để logo chữ đen (Viettel Post) vẫn đọc được ở chế độ tối */
+.vc-logo { display: inline-flex; align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 5px;
+  padding: 2px 5px; vertical-align: middle; }
+.vc-logo img { height: 14px; width: auto; display: block; }
+.chip { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 99px; }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
+.chip.wait { background: var(--warn-soft); color: var(--warn); }
+.chip.fail { background: var(--bad-soft); color: var(--bad); }
+.phone-san { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; }
+.phone-san > div { display: flex; align-items: center; gap: 6px; }
+.pos { color: var(--ok); } .neg { color: var(--bad); }
+.section-title { margin: 28px 0 10px; font-size: 17px; font-weight: 700; letter-spacing: -.2px; }
+.section-title small { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 6px; letter-spacing: 0; }
+/* tên tháng = tiêu đề trang Tổng quan, bấm để đổi tháng */
+.month-pick { appearance: none; -webkit-appearance: none; border: 0; background: none; cursor: pointer; padding: 0 22px 0 0;
+  font-size: 26px; font-weight: 800; letter-spacing: -.6px; color: var(--text);
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(-45deg, transparent 50%, var(--muted) 50%);
+  background-size: 6px 6px; background-position: right 8px center, right 2px center; background-repeat: no-repeat; }
+.month-pick option { font-size: 15px; font-weight: 400; }
+
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.b-ordered { background: var(--warn-soft); color: var(--warn); }
+.b-received { background: var(--teal-soft); color: var(--teal); }
+.b-paid { background: var(--blue-soft); color: var(--blue); }
+.b-done { background: var(--ok-soft); color: var(--ok); }
+.b-cancel { background: var(--bad-soft); color: var(--bad); }
+.b-muted { background: var(--bg); color: var(--muted); }
+.b-accent { background: var(--accent-soft); color: var(--accent); }
+
+/* thẻ đơn = phiếu gửi hàng: dấu mộc trạng thái + đường xé răng cưa trước phần tiền */
+.order { cursor: pointer; transition: border-color .1s; display: flex; flex-direction: column; gap: 8px; }
+.order:hover { border-color: var(--accent); }
+.order .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.order .id { font-weight: 700; color: var(--muted); }
+.order .id b { color: var(--text); }
+.moc { display: inline; }
+.moc span { white-space: nowrap; }
+.moc .sep { font-style: normal; margin-left: 5px; opacity: .6; }
+.order .top .pick { align-items: flex-start; flex: 1; min-width: 0; }
+.order .top .id { min-width: 0; }
+.order .top .stamp { flex-shrink: 0; align-self: flex-start; }
+.stamp { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; font-size: 12px; font-weight: 800;
+  border: 2px solid currentColor; border-radius: 5px; outline: 1px solid currentColor; outline-offset: 2px;
+  transform: rotate(-5deg); margin: 4px 4px 0 0; white-space: nowrap; background: none !important; opacity: .92; }
+.tear { position: relative; border-top: 2px dashed var(--line); margin: 4px -15px; }
+.tear::before, .tear::after { content: ""; position: absolute; top: -9px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--bg); border: 1px solid var(--line); }
+.tear::before { left: -9px; clip-path: inset(0 0 0 50%); }
+.tear::after { right: -9px; clip-path: inset(0 50% 0 0); }
+.order .money-row { background: none; padding: 0; }
+.order .money-row .lai b { font-size: 16px; font-weight: 800; }
+.track { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.track code { font: 600 13px/1 system-ui, sans-serif; letter-spacing: .4px; color: var(--text); }
+.vc-code { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.vc-code:hover { color: var(--accent); }
+.order .pick { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.order .pick input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+/* đơn Đã đặt: sọc trái theo vận chuyển — xanh lá đậm + nền = sắp giao, xanh dương = có mã, cam nét đứt = chưa có mã */
+.order.ship-near { box-shadow: inset 5px 0 0 var(--ok); background: var(--ok-soft); border-color: var(--ok); }
+.order.ship-giao { box-shadow: inset 8px 0 0 var(--ok); border-width: 2px; }
+/* 🏍 đang giao (nhân viên đã đi giao): "lửa cháy" — viền gradient lửa chạy quanh thẻ, quầng cam bập bùng,
+   hàng ngọn lửa nhỏ nhảy trên mép trên thẻ */
+.order.ship-giao { position: relative; border: 2px solid transparent;
+  background: linear-gradient(var(--ok-soft), var(--ok-soft)) padding-box,
+              linear-gradient(90deg, #ff3d00, #ff9100, #ffd600, #ff9100, #ff3d00, #ff9100, #ffd600) border-box;
+  background-size: 100% 100%, 300% 100%;
+  animation: fire-border 2.4s linear infinite, fire-glow .9s ease-in-out infinite alternate; }
+.order.ship-giao::before { content: ""; position: absolute; left: 14px; right: 14px; top: -19px; height: 20px; pointer-events: none;
+  background: radial-gradient(ellipse 8px 19px at 50% 100%, #fff3b0 0, #ffd600 25%, #ff9100 50%, #ff3d00 70%, transparent 72%) 0 100% / 18px 20px repeat-x,
+              radial-gradient(ellipse 5px 12px at 50% 100%, #ffd600 0, #ff6d00 55%, transparent 60%) 9px 100% / 18px 13px repeat-x;
+  transform-origin: 50% 100%; animation: fire-flicker .45s ease-in-out infinite alternate; }
+@keyframes fire-border { to { background-position: 0 0, 300% 0; } }
+@keyframes fire-glow {
+  from { box-shadow: inset 8px 0 0 #ff6d00, 0 0 6px 1px rgba(255, 98, 0, .35); }
+  to { box-shadow: inset 8px 0 0 #ff9100, 0 0 18px 4px rgba(255, 140, 0, .55), 0 -6px 16px rgba(255, 61, 0, .35); }
+}
+@keyframes fire-flicker {
+  0% { transform: scaleY(.75) skewX(-3deg); opacity: .85; }
+  50% { transform: scaleY(1.05) skewX(2deg); opacity: 1; }
+  100% { transform: scaleY(.9) skewX(4deg) translateX(2px); opacity: .9; }
+}
+.badge.near.fire { background: linear-gradient(90deg, #ff3d00, #ff9100); color: #fff; }
+@media (prefers-reduced-motion: reduce) { .order.ship-giao, .order.ship-giao::before { animation: none; } }
+.order.ship-has { box-shadow: inset 5px 0 0 var(--blue); }
+.order.ship-none { box-shadow: inset 5px 0 0 var(--warn); background: var(--gray-card); }
+/* hãng báo đã giao mà đơn còn Đã đặt: viền xanh ngọc (màu Đã nhận) + vòng sáng lan ra theo nhịp để nhớ bấm 📦 Đã nhận */
+.order.ship-arrived { border: 2px solid var(--teal); background: var(--teal-soft); box-shadow: inset 8px 0 0 var(--teal);
+  animation: arrived-ring 2.2s ease-out infinite; }
+@keyframes arrived-ring {
+  0% { box-shadow: inset 8px 0 0 var(--teal), 0 0 0 0 color-mix(in srgb, var(--teal) 60%, transparent); }
+  70%, 100% { box-shadow: inset 8px 0 0 var(--teal), 0 0 0 12px color-mix(in srgb, var(--teal) 0%, transparent); }
+}
+.order .arrived-note { font-size: 13px; font-weight: 700; color: var(--teal); }
+@media (prefers-reduced-motion: reduce) { .order.ship-arrived { animation: none; } }
+/* các mốc đổi trạng thái trong chi tiết đơn: chấm màu trạng thái nối bằng đường dọc */
+.st-timeline { list-style: none; margin: 10px 0 0; padding: 0; font-size: 14px; }
+.st-timeline li { position: relative; padding: 0 0 10px 22px; }
+.st-timeline li::before { content: ""; position: absolute; left: 4px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--dot); }
+.st-timeline li:not(:last-child)::after { content: ""; position: absolute; left: 8px; top: 17px; bottom: 0; width: 2px; background: var(--line); }
+.st-timeline .muted { font-size: 12px; }
+.ship-legend { display: inline-flex; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+.ship-legend .lg { padding: 3px 8px 3px 10px; border-radius: 6px; background: var(--card); border: 1px solid var(--line); }
+.ship-legend .near { box-shadow: inset 4px 0 0 var(--ok); background: var(--ok-soft); }
+.ship-legend .giao { box-shadow: inset 7px 0 0 var(--ok); border: 2px solid var(--ok); }
+.ship-legend .has { box-shadow: inset 4px 0 0 var(--blue); }
+.ship-legend .arrived { box-shadow: inset 7px 0 0 var(--teal); border: 2px solid var(--teal); background: var(--teal-soft); }
+.ship-legend .none { box-shadow: inset 4px 0 0 var(--warn); background: var(--gray-card); }
+.order .courier { font-size: 13px; padding: 5px 9px; border-radius: 8px; background: var(--ok-soft); color: var(--text); }
+.order .courier a { color: var(--ok); font-weight: 700; }
+.order .no-vc { font-size: 13px; font-weight: 700; color: var(--warn); }
+.badge.near { background: var(--ok); color: var(--card); font-weight: 800; }
+.order.picked { outline: 2px solid var(--accent); background: var(--accent-soft); }
+#pickbar:not(:empty) { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; background: var(--card);
+  border-top: 1px solid var(--line); box-shadow: 0 -6px 18px rgba(0,0,0,.08); padding: 10px 16px; }
+body:has(#pickbar:not(:empty)) .fab { display: none; }
+body:has(#pickbar:not(:empty)) main { padding-bottom: 220px; }
+.pickbar { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+.pickbar .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pickbar .nums { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px 14px; font-size: 12px; color: var(--muted); }
+.pickbar .nums b { display: block; font-size: 15px; color: var(--text); }
+.order .title { font-weight: 600; font-size: 16px; }
+.meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.money-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: var(--bg); border-radius: 10px; padding: 8px; }
+.money-row div { font-size: 12px; color: var(--muted); }
+.money-row b { display: block; font-size: 14px; color: var(--text); }
+
+.status-pills { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.pill { cursor: pointer; text-align: left; }
+.pill .value { font-size: 22px; }
+.chart { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-top: 8px; }
+.chart .col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+.chart .barv { width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 2px; opacity: .85; }
+.chart .d { font-size: 10px; color: var(--muted); margin-top: 3px; }
+.card:has(> table) { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); font-size: 14px; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+td.r, th.r { text-align: right; }
+tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); }
+
+.product { padding: 0; overflow: hidden; }
+.product .head { padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); }
+.product .head b { font-size: 16px; }
+.pimgs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 10px 14px 0; }
+.pimgs img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); cursor: zoom-in; }
+.pimgs .meta { flex-basis: 100%; }
+.shop { padding: 12px 14px; border-bottom: 1px dashed var(--line); display: flex; flex-direction: column; gap: 6px; }
+.shop:last-child { border-bottom: 0; }
+.shop.off { opacity: .55; }
+.shop .line1 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.links a { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.links .lk { display: flex; align-items: center; gap: 8px; }
+.links .lk a { flex: 1; min-width: 0; }
+.lk-del { flex: none; border: 0; background: none; cursor: pointer; padding: 2px 4px; font-size: 13px; opacity: .6; border-radius: 6px; }
+.lk-del:hover { opacity: 1; background: var(--bad-soft); }
+.stock-chip { flex: none; border: 0; cursor: pointer; font-family: inherit; }
+.track .checked { font-size: 12px; white-space: nowrap; }
+.by-person { margin-bottom: 14px; }
+.order .addr { font-size: 13px; color: var(--text); line-height: 1.4; overflow-wrap: anywhere; }
+/* thẻ đơn hàng: chữ to hơn cho dễ đọc (người dùng yêu cầu) – chỉ áp cho thẻ đơn, các trang khác giữ cỡ cũ */
+#orders.cards { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+#orders .addr-head { grid-column: 1 / -1; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  padding: 10px 2px 4px; margin-top: 6px; border-bottom: 2px solid var(--line); font-size: 1.05em; }
+#orders .addr-head:first-child { margin-top: 0; }
+#orders .addr-head.click { cursor: pointer; } #orders .addr-head:hover b { text-decoration: underline; }
+.muted.small { font-size: .85em; } tr.on td { background: var(--bg); }
+.order { font-size: 16px; gap: 10px; }
+.order .id { font-size: 15px; }
+.order .title { font-size: 19px; line-height: 1.35; }
+.order .meta { font-size: 15px; color: var(--text); }
+.order .addr { font-size: 15px; line-height: 1.5; }
+.order .track { font-size: 15px; }
+.order .track code { font-size: 15.5px; }
+.order .track .checked { font-size: 13px; }
+.order .badge, .order .stamp { font-size: 13.5px; }
+.order .money-row div { font-size: 14px; }
+.order .money-row b { font-size: 17px; }
+.order .money-row .lai b { font-size: 19px; }
+.order .courier, .order .no-vc { font-size: 15px; }
+.order .btn.sm { font-size: 14.5px; }
+.bonus-body { border-top: 1px solid var(--line); padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; }
+.campaign { border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.campaign .scroll { max-height: 300px; overflow: auto; }
+.campaign.off { opacity: .7; }
+body[data-role="user"] :is([onclick^="removeRec"], [onclick^="deleteQr"], [onclick^="deleteProductImage"], .merge-box) { display: none !important; }
+#update-bar { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; gap: 10px; align-items: center;
+  max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 12px; background: var(--card); border: 1px solid var(--accent);
+  box-shadow: 0 6px 24px rgba(0,0,0,.18); font-size: 14px; }
+.lm-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); }
+.lm-post .lm-couriers td, .lm-post .lm-orders td { vertical-align: top; }
+.lm-post table { font-size: 14px; }
+.lm-post .lm-couriers, .lm-post .lm-orders { padding: 0 14px; overflow-x: auto; }
+.lm-couriers td:nth-child(2) { white-space: nowrap; }
+.lm-orders summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
+.lm-orders .scroll { max-height: 420px; overflow: auto; }
+.btn.xs { padding: 0 5px; font-size: 12px; min-height: 0; line-height: 1.6; }
+.by-person summary { cursor: pointer; padding: 12px 14px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.by-person summary::-webkit-details-marker { display: none; }
+.by-person summary::before { content: "▸"; color: var(--muted); }
+.by-person[open] summary::before { content: "▾"; }
+.by-person .scroll { max-height: 360px; overflow: auto; border-top: 1px solid var(--line); }
+.res-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+.res-main { flex: 1 1 100%; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.res-row .stock-chip, .res-row > .badge { margin-right: auto; }
+.res-main b, .res-main a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-main a { font-size: 12px; }
+.check-list { max-height: 50vh; overflow: auto; display: flex; flex-direction: column; gap: 6px; margin-top: 10px; font-size: 13px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.switch { position: relative; width: 40px; height: 23px; flex: none; cursor: pointer; }
+.switch input { display: none; }
+.switch span { position: absolute; inset: 0; background: var(--line); border-radius: 99px; transition: .15s; }
+.switch span::after { content: ""; position: absolute; width: 17px; height: 17px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .15s; }
+.switch input:checked + span { background: var(--ok); }
+.switch input:checked + span::after { transform: translateX(17px); }
+
+.overlay { position: fixed; inset: 0; background: rgba(10,12,20,.45); z-index: 50; display: flex; align-items: flex-end; justify-content: center; }
+@media (min-width: 700px) { .overlay { align-items: center; } }
+.modal { background: var(--card); width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto;
+  border-radius: 18px 18px 0 0; padding: 18px; animation: up .18s ease-out; }
+@media (min-width: 700px) { .modal { border-radius: 18px; } }
+@keyframes up { from { transform: translateY(30px); opacity: 0; } }
+.modal.nudge { animation: nudge .25s ease-in-out; }
+@keyframes nudge { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+@media (prefers-reduced-motion: reduce) { .modal, .modal.nudge { animation: none; } }
+.modal h2 { margin: 0 0 4px; font-size: 18px; display: flex; align-items: center; gap: 8px; }
+.modal .close { margin-left: auto; border: 0; background: var(--bg); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 16px; }
+.form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-top: 14px; }
+.form .full { grid-column: 1 / -1; }
+.social { display: flex; gap: 6px; flex-wrap: wrap; }
+.social a { text-decoration: none; }
+.social .zalo { color: #0068ff; }
+.social .fb { color: #1877f2; }
+.tiers { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px dashed var(--line); border-radius: 10px; }
+.tiers-head { font-size: 12px; font-weight: 600; }
+.tiers > .btn { align-self: flex-start; }
+.tier-row { display: grid; grid-template-columns: 60px 1fr 1fr 1fr 34px; gap: 8px; align-items: start; }
+@media (max-width: 520px) {  /* điện thoại: % · tối đa / giá · công, nút ★ / ✕ bên phải */
+  .tier-row { grid-template-columns: 1fr 1fr 30px; padding-bottom: 8px; border-bottom: 1px dashed var(--line); }
+  .tier-row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .tier-row > .btn, .tier-row > .tier-main { grid-column: 3; grid-row: 1 / span 2; }
+}
+.tier-row > .btn, .tier-main { margin-top: 22px; }
+.tier-main { text-align: center; color: var(--warn); font-size: 18px; }
+.form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 500; }
+.form .hint { font-size: 12px; color: var(--accent); min-height: 0; }
+.modal .foot { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+.modal .foot .left { margin-right: auto; }
+.timeline { list-style: none; padding: 0; margin: 10px 0 0; border-left: 2px solid var(--line); }
+.timeline li { padding: 0 0 12px 14px; position: relative; font-size: 14px; }
+.timeline li::before { content: ""; position: absolute; left: -6px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+.timeline li:first-child::before { background: var(--accent); }
+.timeline .t { color: var(--muted); font-size: 12px; }
+.qr { max-width: 100%; border-radius: 12px; display: block; margin: 10px auto; }
+
+#toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 99; background: var(--text); color: var(--bg);
+  padding: 10px 18px; border-radius: 12px; font-weight: 500; box-shadow: 0 6px 20px rgba(0,0,0,.2); transition: opacity .2s; max-width: 90vw; }
+#toast.err { background: var(--bad); color: #fff; }
+.empty { text-align: center; color: var(--muted); padding: 40px 10px; }
+.login { max-width: 340px; margin: 14vh auto; text-align: center; }
+.login .card { padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+.fab { position: fixed; right: 18px; bottom: 18px; z-index: 20; border-radius: 99px; padding: 12px 18px; box-shadow: 0 6px 18px rgba(91,60,196,.35); }
+@media (max-width: 520px) {
+  .cards, #orders.cards { grid-template-columns: 1fr; }
+  .form { grid-template-columns: 1fr; }
+  .money-row { grid-template-columns: repeat(2, 1fr); }
+  .kpi .value { font-size: 24px; }
+  .brand span { display: none; }
+}
+</style>
+</head>
+<body>
+<div id="login" class="login hidden">
+  <div style="font-size:44px">📦</div>
+  <h2>Quản lí đơn</h2>
+  <form class="card" onsubmit="doLogin(event)">
+    <input class="input" id="un" placeholder="Tên đăng nhập" autocomplete="username" autocapitalize="none" autofocus>
+    <input class="input" type="password" id="pw" placeholder="Mật khẩu" autocomplete="current-password">
+    <button class="btn primary">Đăng nhập</button>
+  </form>
+  <div id="setup-hint" class="card hidden" style="margin-top:12px;text-align:left;font-size:14px">
+    Chưa có tài khoản nào. Tạo admin trên máy chạy bot:<br>
+    <code style="display:block;margin-top:8px;padding:8px;background:var(--bg);border-radius:8px;word-break:break-all">docker compose exec web python manage.py createadmin &lt;tên&gt;</code>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header><div class="bar">
+    <div class="brand">📦 <span>Quản lí đơn</span></div>
+    <nav id="nav"></nav>
+    <button class="btn sm" id="me-btn" onclick="accountMenu()" title="Tài khoản">👤</button>
+  </div></header>
+  <main id="view"></main>
+</div>
+<div id="toast" class="hidden"></div>
+<div id="modal-root"></div>
+
+<script>
+// ---------- tiện ích ----------
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const jsq = s => esc(JSON.stringify(String(s ?? "")));  // chuỗi an toàn trong onclick="…"
+const money = n => (Math.round(n || 0)).toLocaleString("vi-VN");  // không ghi đơn vị (đ, k): 4.300.000
+function short(n) {  // giống utils.money_short: 4300000 → 4tr3, 200000 → 200
+  n = Math.round(n || 0);
+  if (n < 0) return "-" + short(-n);
+  if (n >= 1e6 && n % 1000 === 0) {
+    const tr = Math.floor(n / 1e6), rest = n % 1e6;
+    if (!rest) return tr + "tr";
+    return rest % 1e5 === 0 ? `${tr}tr${rest / 1e5}` : `${tr}tr${String(rest / 1000).padStart(3, "0")}`;
+  }
+  if (n >= 1000 && n % 1000 === 0) return String(n / 1000);
+  return money(n);
+}
+const dtFull = s => s ? `${s.slice(11, 16)} ${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : "";
+const dt = s => s ? `${s.slice(8, 10)}/${s.slice(5, 7)} ${s.slice(11, 16)}` : "";
+const STATUS = {"Đã đặt": ["⏳", "b-ordered"], "Đã nhận": ["📦", "b-received"], "Thanh toán": ["💵", "b-paid"], "Hoàn thành": ["✅", "b-done"], "Đã hủy": ["❌", "b-cancel"]};
+const ST_COLOR = {"Đã đặt": "var(--warn)", "Đã nhận": "var(--teal)", "Thanh toán": "var(--blue)", "Hoàn thành": "var(--ok)", "Đã hủy": "var(--bad)"};
+// đơn đi từng bước Đã đặt → Đã nhận → Thanh toán → Hoàn thành, không nhảy cóc (máy chủ cũng chặn):
+// chỉ đơn Đã nhận mới trả công (→ Thanh toán), chỉ đơn Thanh toán mới bán (→ Hoàn thành)
+const payable = o => o.trang_thai === "Đã nhận";
+const stamp = st => `<span class="stamp ${(STATUS[st] || [])[1] || "b-muted"}">${(STATUS[st] || [""])[0]} ${esc(st)}</span>`;
+const badge = st => `<span class="badge ${(STATUS[st] || [])[1] || "b-muted"}">${(STATUS[st] || [""])[0]} ${esc(st)}</span>`;
+
+function toast(msg, err) {
+  const t = $("#toast");
+  t.textContent = msg; t.className = err ? "err" : "";
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.className = "hidden", 2600);
+}
+
+// server được cập nhật trong lúc trang đang mở → trang vẫn chạy code cũ: hiện thanh báo tải lại
+const APP_VERSION = "__APP_VERSION__";
+function checkVersion(v) {
+  if (!v || v === APP_VERSION || APP_VERSION.startsWith("__") || $("#update-bar")) return;
+  document.body.insertAdjacentHTML("beforeend", `<div id="update-bar">🔄 Web vừa được cập nhật bản mới.
+    <button class="btn sm primary" onclick="location.reload()">Tải lại trang</button></div>`);
+}
+async function api(path, opts = {}) {
+  const init = {method: opts.method || "GET", headers: {}};
+  if (opts.body !== undefined) { init.body = JSON.stringify(opts.body); init.headers["Content-Type"] = "application/json"; }
+  const res = await fetch("/api" + path, init);
+  checkVersion(res.headers.get("X-App-Version"));
+  if (res.status === 401 && !["/login", "/me/password"].includes(path)) { showLogin(); throw new Error("Chưa đăng nhập"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { const m = typeof data.detail === "string" ? data.detail : "Lỗi " + res.status; toast(m, true); throw new Error(m); }
+  return data;
+}
+const post = (p, body) => api(p, {method: "POST", body: body || {}});
+const patch = (p, body) => api(p, {method: "PATCH", body});
+const del = p => api(p, {method: "DELETE"});
+
+// ---------- đăng nhập ----------
+async function showLogin() {
+  closeModal();
+  $("#app").classList.add("hidden"); $("#login").classList.remove("hidden"); $("#un").focus();
+  const s = await fetch("/api/setup").then(r => r.json()).catch(() => ({has_users: true}));
+  $("#setup-hint").classList.toggle("hidden", s.has_users);
+}
+async function doLogin(e) {
+  e.preventDefault();
+  try { await post("/login", {username: $("#un").value, password: $("#pw").value}); } catch { return; }
+  $("#pw").value = ""; start();
+}
+async function logout() { await post("/logout"); showLogin(); }
+function accountMenu() {
+  const me = state.me;
+  openModal(`${modalHead(`👤 ${esc(me.username)} <span class="badge ${me.role === "admin" ? "b-accent" : "b-muted"}">${me.role}</span>`)}
+    <div class="form">
+      ${field(["old", "Mật khẩu hiện tại", "password", ""])}${field(["new", "Mật khẩu mới (≥ 6 ký tự)", "password", ""])}
+    </div>
+    <div class="foot"><button class="btn bad left" onclick="logout()">🚪 Đăng xuất</button>
+      <button class="btn primary" onclick="changeMyPassword()">Đổi mật khẩu</button></div>`);
+}
+async function changeMyPassword() {
+  await post("/me/password", formData());
+  toast("🔑 Đã đổi mật khẩu – các thiết bị khác đã bị đăng xuất"); closeModal();
+}
+
+// ---------- điều hướng ----------
+const TABS = [["home", "🏠 Tổng quan"], ["orders", "🧾 Đơn hàng"], ["sales", "🔥 Săn sale"],
+              ["products", "🏷 Sản phẩm"], ["people", "👤 Người đặt"], ["phones", "📞 SĐT"], ["addresses", "📍 Địa chỉ"], ["lastmile", "🏍 Giao hàng"], ["users", "🔐 Tài khoản"]];
+const state = {picked: new Map(), tab: "home", status: "Đã đặt", q: "", tu: "", den: "", month: null, saleAll: false, saleQ: "", saleGroup: "", meta: null, byPerson: false, byProduct: false, byBonus: false, byAddr: false, groupAddr: false};
+try { const {status, saleAll, saleGroup, byPerson, byProduct, byBonus, byAddr, groupAddr} = JSON.parse(localStorage.getItem("qld") || "{}"); Object.assign(state, {status: status || state.status, saleAll: !!saleAll, saleGroup: saleGroup || "", byPerson: !!byPerson, byProduct: !!byProduct, byBonus: !!byBonus, byAddr: !!byAddr, groupAddr: !!groupAddr}); } catch {}
+const save = () => { try { localStorage.setItem("qld", JSON.stringify({status: state.status, saleAll: state.saleAll, saleGroup: state.saleGroup, byPerson: state.byPerson, byProduct: state.byProduct, byBonus: state.byBonus, byAddr: state.byAddr, groupAddr: state.groupAddr})); } catch {} };
+
+// mỗi tab 1 đường dẫn (web.py trả index.html cho các path này); bộ lọc nằm trong query: /don-hang?status=…&q=…, /?month=…
+const ROUTES = {home: "/", orders: "/don-hang", sales: "/san-sale", products: "/san-pham", people: "/nguoi-dat",
+                phones: "/sdt", addresses: "/dia-chi", lastmile: "/giao-hang", users: "/tai-khoan"};
+function tabUrl(tab) {
+  const qs = new URLSearchParams();
+  if (tab === "orders") {
+    qs.set("status", state.status);
+    for (const k of ["q", "tu", "den", "cd", "vc", "san", "ngay", "dc"]) if (state[k]) qs.set(k, state[k]);
+  }
+  if (tab === "home" && state.month) qs.set("month", state.month);
+  return ROUTES[tab] + (qs.toString() ? "?" + qs : "");
+}
+function readUrl() {
+  const path = location.pathname.replace(/\/+$/, "") || "/";
+  const qs = new URLSearchParams(location.search);
+  state.tab = Object.keys(ROUTES).find(k => ROUTES[k] === path) || "home";
+  if (state.tab === "orders") {
+    state.status = qs.get("status") || state.status;
+    for (const k of ["q", "tu", "den", "cd", "vc", "san", "ngay", "dc"]) state[k] = qs.get(k) || "";
+  }
+  if (state.tab === "home") state.month = qs.get("month") || state.month;
+}
+// replace = sửa URL hiện tại (gõ tìm kiếm) thay vì thêm 1 bước Back
+function syncUrl(replace) {
+  const url = tabUrl(state.tab);
+  if (url !== location.pathname + location.search) history[replace ? "replaceState" : "pushState"](null, "", url);
+}
+function render() {
+  if (state.tab === "users" && state.me?.role !== "admin") { state.tab = "home"; syncUrl(true); }
+  $("#nav").innerHTML = TABS.filter(([k]) => k !== "users" || state.me?.role === "admin").map(([k, l]) =>
+    `<a href="${ROUTES[k]}" class="${k === state.tab ? "on" : ""}" onclick="if(!event.ctrlKey&&!event.metaKey&&!event.shiftKey){event.preventDefault();go('${k}')}">${l}</a>`).join("");
+  ({home: viewHome, orders: viewOrders, sales: viewSales, products: viewProducts, people: viewPeople, phones: viewPhones, addresses: viewAddresses, lastmile: viewLastMile, users: viewUsers})[state.tab]();
+}
+function go(tab, extra) {
+  // vào Đơn hàng từ tab khác (link "Xem đơn", ô trạng thái…) thì bỏ lọc ngày cũ
+  if (tab === "orders" && state.tab !== "orders") Object.assign(state, {tu: "", den: "", cd: "", vc: "", san: "", ngay: "", dc: ""});
+  Object.assign(state, {tab}, extra || {}); save();
+  syncUrl(); render();
+}
+addEventListener("popstate", () => { closeModal(); readUrl(); render(); });
+async function start() {
+  try { [state.me, state.meta] = await Promise.all([api("/me"), api("/meta")]); } catch { return; }
+  $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
+  document.body.dataset.role = state.me.role;  // user thường: ẩn nút xóa / gộp (server cũng chặn)
+  readUrl(); syncUrl(true); render();
+}
+const refreshMeta = async () => { state.meta = await api("/meta"); };
+
+// ---------- modal ----------
+function openModal(html) {
+  $("#modal-root").innerHTML = `<div class="overlay" onclick="if(event.target===this)overlayClick(this)"><div class="modal">${html}</div></div>`;
+  document.body.style.overflow = "hidden";
+  const f = $("#modal-root input:not([type=hidden]), #modal-root textarea"); if (f && innerWidth > 700) f.focus();
+}
+// bấm ra ngoài: form đang nhập (sửa sale, đơn…) thì không đóng để khỏi mất dữ liệu, chỉ rung nhẹ nhắc bấm ✕ / Hủy
+function overlayClick(overlay) {
+  const modal = overlay.firstElementChild;
+  if (!modal.querySelector(".form")) return closeModal();
+  modal.classList.remove("nudge"); void modal.offsetWidth; modal.classList.add("nudge");
+}
+function closeModal() { $("#modal-root").innerHTML = ""; document.body.style.overflow = ""; }
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+const modalHead = title => `<h2>${title}<button class="close" onclick="closeModal()">✕</button></h2>`;
+
+// ô nhập: [field, nhãn, loại, giá trị, tùy chọn]
+function field([name, label, type, value, opt = {}]) {
+  const cls = opt.full ? "full" : "";
+  const v = esc(value ?? "");
+  let input;
+  if (type === "select") input = `<select class="input" name="${name}">${(opt.options || []).map(o => Array.isArray(o)
+      ? `<option value="${esc(o[0])}" ${String(o[0]) === String(value ?? "") ? "selected" : ""}>${esc(o[1])}</option>`
+      : `<option ${o === value ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+  else if (type === "textarea") input = `<textarea class="input" name="${name}" placeholder="${esc(opt.ph || "")}">${v}</textarea>`;
+  else {
+    const list = opt.list ? `list="dl-${name}"` : "";
+    const dl = opt.list ? `<datalist id="dl-${name}">${opt.list.map(o => `<option value="${esc(o)}">`).join("")}</datalist>` : "";
+    const money = type === "money" ? `oninput="moneyHint(this)" data-qty="${opt.qty || 1}"` : "";
+    input = `<input class="input" name="${name}" value="${v}" ${list} ${money} placeholder="${esc(opt.ph || "")}"
+      ${type === "num" ? 'inputmode="numeric"' : ""} ${type === "password" ? 'type="password" autocomplete="new-password"' : 'autocomplete="off"'}>${dl}`;
+  }
+  return `<label class="${cls}">${esc(label)}${input}${type === "money" || opt.hint ? '<span class="hint"></span>' : ""}</label>`;
+}
+async function moneyHint(el) {
+  const hint = el.parentElement.querySelector(".hint");
+  clearTimeout(el._t);
+  el._t = setTimeout(async () => {
+    if (!el.value.trim()) { hint.textContent = ""; return; }
+    const r = await api(`/money?v=${encodeURIComponent(el.value)}&qty=${el.dataset.qty || 1}`).catch(() => ({text: ""}));
+    hint.textContent = r.text ? "= " + r.text : "⚠️ chưa đọc được";
+  }, 250);
+}
+const formData = () => Object.fromEntries([...document.querySelectorAll("#modal-root [name]")].map(e => [e.name, e.value]));
+// chỉ gửi trường đã đổi
+function changed(orig) {
+  const out = {};
+  for (const [k, v] of Object.entries(formData())) if (String(orig[k] ?? "") !== v) out[k] = v;
+  return out;
+}
+
+// ---------- tổng quan ----------
+async function viewHome() {
+  const s = await api("/stats" + (state.month ? `?month=${state.month}` : ""));
+  state.month = s.month;
+  const [y, m] = s.month.split("-");
+  const t = s.total;
+  const maxDay = Math.max(1, ...s.daily.map(d => d.so_don));
+  const days = new Date(+y, +m, 0).getDate();
+  const byDay = Object.fromEntries(s.daily.map(d => [+d.ngay, d.so_don]));
+  // dự kiến = đơn chưa bán của tháng (Đã đặt + Đã nhận + Thanh toán); thực tế = Hoàn thành
+  const fcRows = Object.entries(s.forecast).filter(([st]) => st !== "Hoàn thành");
+  const fc = fcRows.reduce((a, [, r]) => { for (const k in r) a[k] = (a[k] || 0) + r[k]; return a; }, {});
+  const out = Object.values(s.outstanding).reduce((a, r) => { for (const k in r) a[k] = (a[k] || 0) + r[k]; return a; }, {});
+  const real = s.forecast["Hoàn thành"] || {so_don: 0, chi: 0, thu: 0, lai: 0, thuong: 0, so_moc: 0, chi_co_gia: 0};
+  const thuongNote = r => r.thuong ? ` − <b>${short(r.thuong)}</b> 🎁` : "";
+  $("#view").innerHTML = `
+    <div class="toolbar">
+      <select class="month-pick" aria-label="Chọn tháng" onchange="go('home',{month:this.value})">
+        ${s.months.map(mo => `<option value="${mo}" ${mo === s.month ? "selected" : ""}>Tháng ${+mo.slice(5)}/${mo.slice(0, 4)}</option>`).join("")}
+      </select>
+      <span class="meta">Số tiền không tính đơn hủy</span>
+    </div>
+    <div class="grid kpis">
+      <div class="card kpi wide"><div class="label">🧾 Số đơn trong tháng</div>
+        <div class="value">${t.so_don} <span class="muted" style="font-weight:400">đơn · không tính ${s.month_counts["Đã hủy"]} đơn hủy</span></div>
+        <div class="st-bar">${Object.entries(s.month_counts).filter(([, n]) => n).map(([st, n]) =>
+          `<div style="flex:${n};background:${ST_COLOR[st]}" title="${st}: ${n}"></div>`).join("")}</div>
+        <div class="st-grid">${Object.entries(s.month_counts).map(([st, n]) =>
+          `<div class="st-tile ${STATUS[st][1]}${n ? "" : " zero"}" onclick="go('orders',{status:'${st}',q:''})">
+            <span>${STATUS[st][0]} ${st}</span><b>${n}</b></div>`).join("")}</div></div>
+      <div class="card kpi wide"><div class="label">💸 Đã chi trong tháng</div><div class="value">${short(s.spent)}</div>
+        ${splitRows([["🛒 Tiền hàng", t.tong_dat, "accent"], ["🛠 Tiền công", t.tong_cong, "warn"],
+          ...(s.thuong ? [["🎁 Thưởng chiến dịch", s.thuong, "teal"]] : [])], s.spent)}</div>
+      <div class="card kpi wide"><div class="label">⏳ Vốn chưa thu về <span class="muted">· mọi tháng</span></div>
+        <div class="value neg">${short(out.chi)}</div>
+        ${splitRows(Object.entries(s.outstanding).map(([st, r]) =>
+            [`${STATUS[st][0]} ${st} · ${r.so_don} đơn`, r.chi, {"Đã đặt": "warn", "Đã nhận": "teal"}[st] || "accent",
+             `go('orders',{status:'${st}',q:''})`]), out.chi)}
+        <div class="sub">${out.thieu_gia === out.so_don ? "chưa đơn nào có giá shop thu" : `giá shop thu đã nhập ${short(out.thu)}`}${out.thieu_gia && out.thieu_gia < out.so_don
+          ? ` <span class="neg">(${out.thieu_gia} đơn chưa có giá shop thu)</span>` : ""}</div></div>
+    </div>
+
+    <div class="section-title">Thực tế<small>đơn Hoàn thành</small></div>
+    <div class="grid kpis">
+      <div class="card kpi"><div class="label">💰 Thu thực tế</div><div class="value">${short(real.thu)}</div>
+        <div class="formula">= tổng giá shop thu của <b>${real.so_don}</b> đơn Hoàn thành</div></div>
+      <div class="card kpi"><div class="label">📈 Lãi thực tế</div>
+        <div class="value ${real.lai >= 0 ? "pos" : "neg"}">${short(real.lai)}</div>
+        <div class="formula">= thu − (giá đặt + công) − thưởng chiến dịch của đơn Hoàn thành<br>
+          = <b>${short(real.thu)}</b> − (<b>${short(real.gia_dat)}</b> + <b>${short(real.cong)}</b>)${thuongNote(real)}
+          ${real.thuong ? `<br>🎁 thưởng ${real.so_moc} lần đạt mốc (tính vào đơn mốc)` : ""}</div></div>
+    </div>
+
+    <div class="section-title">Dự kiến<small>đơn chưa bán: Đã đặt + Đã nhận + Thanh toán</small></div>
+    <div class="grid kpis">
+      <div class="card kpi"><div class="label">🔮 Thu dự kiến</div><div class="value">${short(fc.thu)}</div>
+        <div class="formula">= tổng giá shop thu đã nhập của <b>${fc.so_don - fc.thieu_gia}/${fc.so_don}</b> đơn chưa bán
+          ${fc.thieu_gia ? `<br><span class="neg">${fc.thieu_gia} đơn chưa có giá shop thu → tính 0</span>` : ""}</div></div>
+      <div class="card kpi"><div class="label">🎯 Lãi dự kiến</div>
+        <div class="value ${fc.lai >= 0 ? "pos" : "neg"}">${short(fc.lai)}</div>
+        <div class="formula">= thu − (giá đặt + công) của đơn đã có giá shop thu − thưởng chiến dịch<br>
+          ${fc.thu || fc.thuong ? `= <b>${short(fc.thu)}</b> − <b>${short(fc.chi_co_gia)}</b>${thuongNote(fc)}` : ""}
+          ${fc.thuong ? `<br>🎁 thưởng ${fc.so_moc} lần đạt mốc (đơn mốc đã trả công, chưa bán)` : ""}
+          ${fc.thieu_gia ? `<br><span class="neg">${fc.thieu_gia} đơn chưa có giá shop thu (chi ${short(fc.chi - fc.chi_co_gia - fc.thuong)}) không tính</span>` : ""}</div></div>
+    </div>
+      <div class="card" style="margin-top:14px">
+        <table style="min-width:330px"><tr><th>Trạng thái</th><th class="r">Đơn</th><th class="r">Chi</th><th class="r">Thu</th><th class="r">Lãi</th></tr>
+        ${fcRows.map(([st, r]) => `<tr style="cursor:pointer" onclick="go('orders',{status:'${st}',q:''})"><td>${badge(st)}</td>
+          <td class="r">${r.so_don}</td><td class="r">${short(r.chi)}</td>
+          <td class="r">${r.thu ? short(r.thu) : "–"}${r.thieu_gia ? `<div class="muted neg">${r.thieu_gia} đơn chưa có giá shop thu</div>` : ""}</td>
+          <td class="r ${r.lai >= 0 ? "pos" : "neg"}">${r.thu || r.thuong ? short(r.lai) : "–"}</td></tr>`).join("")}
+        <tr><td><b>Tổng</b></td><td class="r"><b>${fc.so_don}</b></td><td class="r"><b>${short(fc.chi)}</b></td>
+          <td class="r"><b>${short(fc.thu)}</b></td><td class="r ${fc.lai >= 0 ? "pos" : "neg"}"><b>${short(fc.lai)}</b></td></tr>
+        </table>
+        <div class="formula"><b>Chi</b> = giá đặt + công + 🎁 thưởng chiến dịch (tính vào đơn mốc) · <b>Thu</b> = tổng giá shop thu đã nhập (chưa nhập = 0) ·
+          <b>Lãi</b> = thu − (giá đặt + công) của đơn đã có giá shop thu − thưởng</div></div>
+
+    <div class="section-title">Trạng thái đơn<small>mọi tháng</small></div>
+    <div class="status-pills">
+      ${Object.entries(s.status_counts).map(([st, n]) => `
+        <div class="card kpi pill" onclick="go('orders',{status:'${st}',q:''})">
+          <div class="label">${badge(st)}</div><div class="value">${n}</div></div>`).join("")}
+    </div>
+
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));margin-top:22px">
+      <div class="card"><h3>📅 Đơn theo ngày</h3>
+        <div class="chart">${Array.from({length: days}, (_, i) => {
+          const n = byDay[i + 1] || 0;
+          return `<div class="col" title="${i + 1}/${+m}: ${n} đơn"><div class="barv" style="height:${n / maxDay * 100}%;${n ? "" : "opacity:.15"}"></div>
+            <div class="d">${(i + 1) % 5 === 0 || i === 0 ? i + 1 : ""}</div></div>`;
+        }).join("")}</div>
+      </div>
+      <div class="card"><h3>🛒 Theo sàn</h3>
+        <table style="min-width:380px"><tr><th>Sàn</th><th></th><th class="r">Đơn</th><th class="r">Chi</th><th class="r">Thu</th><th class="r">Chênh</th></tr>
+        ${s.by_source.map(r => `<tr><td>${sanTag(r.nguon_don, "")}</td>
+          <td>${r.hoan_thanh ? badge("Hoàn thành") : '<span class="badge b-muted">chưa xong</span>'}</td>
+          <td class="r">${r.so_don}</td><td class="r">${short(r.tong_dat + r.tong_cong)}</td>
+          <td class="r">${short(r.tong_thu)}</td>
+          <td class="r ${r.tong_thu - r.tong_dat - r.tong_cong >= 0 ? "pos" : "neg"}">${r.hoan_thanh ? short(r.tong_thu - r.tong_dat - r.tong_cong) : "–"}</td></tr>`).join("")
+          || '<tr><td colspan="6" class="empty">Chưa có đơn</td></tr>'}
+        </table>
+      </div>
+      <div class="card"><h3>🏆 Top 5 công trong tháng</h3>
+        ${s.top_cong.length ? `<table>${s.top_cong.map((p, i) => `<tr class="click" onclick="go('orders',{status:'all',q:${jsq(p.ten)}})">
+          <td>${["🥇", "🥈", "🥉", "4.", "5."][i]} ${esc(p.ten)}</td><td class="r muted">${p.so_don} đơn · cao nhất ${short(p.cao_nhat)}</td>
+          <td class="r"><b>${short(p.cong)}</b></td></tr>`).join("")}</table>` : '<div class="empty">Chưa có công</div>'}
+      </div>
+      <div class="card"><h3>🛠 Công chưa trả</h3>
+        ${s.unpaid.length ? `<table>${s.unpaid.map(p => `<tr class="click" onclick="go('orders',{status:'all',q:${jsq(p.ten)}})">
+          <td>${esc(p.ten)}</td><td class="r">${p.so_chua_tra} đơn</td><td class="r"><b>${short(p.cong)}</b></td></tr>`).join("")}
+          <tr><td><b>Tổng</b></td><td></td><td class="r"><b>${short(s.unpaid.reduce((a, p) => a + p.cong, 0))}</b></td></tr></table>`
+          : '<div class="empty">Đã trả hết 🎉</div>'}
+      </div>
+    </div>`;
+}
+
+// các phần của 1 tổng: [nhãn, số tiền, màu, onclick?] → dòng nhãn · tiền · % kèm thanh tỉ lệ
+function splitRows(parts, total) {
+  return `<div class="split">${parts.map(([label, v, color, click]) => `
+    <div class="split-row${click ? " click" : ""}" ${click ? `onclick="${click}"` : ""}>
+      <span>${label}</span><b>${short(v)}</b><span class="muted">${total ? Math.round(v / total * 100) : 0}%</span>
+      <i style="width:${total ? v / total * 100 : 0}%;background:var(--${color})"></i></div>`).join("")}</div>`;
+}
+
+// ---------- đơn hàng ----------
+async function viewOrders() {
+  $("#view").innerHTML = `
+    <div class="toolbar">
+      <div class="seg" id="status-seg"></div>
+      <input class="input grow" placeholder="🔍 Tìm tên, tên trên đơn, SĐT, mã đơn, sản phẩm, địa chỉ…" value="${esc(state.q)}"
+        oninput="clearTimeout(this._t);this._t=setTimeout(()=>{state.q=this.value;syncUrl(true);loadOrders()},300)">
+    </div>
+    <div class="toolbar">
+      <div class="seg" title="Khoảng ngày bên cạnh lọc theo ngày tạo đơn hay ngày thanh toán công">${[["", "📅 Ngày tạo"], ["tt", "💳 Ngày thanh toán"]].map(([k, l]) =>
+        `<button class="${(state.ngay || "") === k ? "on" : ""}" onclick="go('orders',{ngay:'${k}'})">${l}</button>`).join("")}</div>
+      <div class="seg">${DATE_PRESETS.map(([k, l]) => `<button class="${datePreset() === k ? "on" : ""}" onclick="setDates('${k}')">${l}</button>`).join("")}</div>
+      <div class="date-range">${dateBox("tu", "từ ngày")} → ${dateBox("den", "đến ngày")}</div>
+    </div>
+    <div class="toolbar"><div class="seg" id="cd-seg"></div></div>
+    <div class="toolbar"><div class="seg" id="san-seg"></div><div class="seg" id="vc-seg"></div></div>
+    <div id="bonus"></div>
+    <div id="by-person"></div>
+    <div id="by-product"></div>
+    <div id="by-addr"></div>
+    <div class="toolbar">
+      <button class="btn" onclick="pickAll()">☑ Chọn tất cả đơn đang hiện</button>
+      <button class="btn${state.groupAddr ? " primary" : ""}" title="Xếp thẻ đơn thành từng nhóm địa chỉ giống nhau (Ngõ 34 láng hạ = 12B 34 láng hạ, 10 lh = 10 láng hạ…)"
+        onclick="state.groupAddr=!state.groupAddr;save();this.classList.toggle('primary',state.groupAddr);renderOrderCards()">🏠 Xếp theo địa chỉ</button>
+      <span id="dc-filter"></span>
+      <span id="track-all"></span>
+      <span id="ship-legend" class="ship-legend"></span>
+      <span class="muted" id="orders-total"></span>
+    </div>
+    <div id="orders" class="grid cards"></div>
+    <div id="pickbar"></div>
+    <button class="btn primary fab" onclick="orderForm()">＋ Thêm đơn</button>`;
+  renderPickbar();
+  loadOrders();
+}
+// lọc theo ngày tạo đơn: state.tu / state.den = "YYYY-MM-DD" (rỗng = không giới hạn)
+const DATE_PRESETS = [["all", "Mọi lúc"], ["today", "Hôm nay"], ["7d", "7 ngày"], ["14d", "14 ngày"], ["21d", "21 ngày"], ["month", "Tháng này"], ["prev", "Tháng trước"]];
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function presetRange(k) {
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  const lastDays = n => [ymd(new Date(y, m, now.getDate() - n + 1)), ymd(now)];  // n ngày tính cả hôm nay
+  return {all: ["", ""], today: [ymd(now), ymd(now)], "7d": lastDays(7), "14d": lastDays(14), "21d": lastDays(21),
+          month: [ymd(new Date(y, m, 1)), ymd(new Date(y, m + 1, 0))],
+          prev: [ymd(new Date(y, m - 1, 1)), ymd(new Date(y, m, 0))]}[k];
+}
+const datePreset = () => DATE_PRESETS.map(([k]) => k).find(k => presetRange(k).join() === [state.tu || "", state.den || ""].join());
+// ô ngày dd/mm/yyyy (gõ tay: 5/10, 05/10/26, 5-10-2026, liền số 0510 / 051026 / 05102026…) + nút 📅 mở lịch của trình duyệt
+const dmy = s => s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : "";
+function parseDmy(text) {
+  if (!text.trim()) return "";
+  const m = text.trim().match(/^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2}|\d{4}))?$/)
+    || text.trim().match(/^(\d{2})(\d{2})(\d{2}|\d{4})?$/);  // liền số: ddmm, ddmmyy, ddmmyyyy
+  if (!m) return null;
+  const y = !m[3] ? new Date().getFullYear() : m[3].length === 2 ? 2000 + +m[3] : +m[3];
+  const d = new Date(y, m[2] - 1, m[1]);
+  return d.getDate() === +m[1] && d.getMonth() === m[2] - 1 ? ymd(d) : null;
+}
+function dateBox(key, label) {
+  const set = key === "tu" ? "setDates(null,v,null)" : "setDates(null,null,v)";
+  return `<span class="date-box"><input class="input" inputmode="numeric" placeholder="dd/mm/yyyy" title="${label}" value="${dmy(state[key])}"
+      onchange="const v=parseDmy(this.value);if(v===null){toast('Ngày không đúng, gõ dạng dd/mm/yyyy hoặc liền số 03112026',true);this.value=dmy(state.${key})}else{${set}}">
+    <button class="btn sm" title="Chọn trên lịch" onclick="const p=this.nextElementSibling;try{p.showPicker()}catch{p.click()}">📅</button>
+    <input type="date" class="picker" tabindex="-1" value="${state[key] || ""}" onchange="const v=this.value;${set}"></span>`;
+}
+function setDates(preset, tu, den) {
+  let [a, b] = preset ? presetRange(preset) : [tu ?? state.tu ?? "", den ?? state.den ?? ""];
+  if (a && b && a > b) [a, b] = [b, a];
+  go("orders", {tu: a, den: b});
+}
+async function loadOrders() {
+  const qs = new URLSearchParams();
+  if (state.status) qs.set("status", state.status);
+  if (state.q) qs.set("q", state.q);
+  if (state.tu) qs.set("tu", state.tu);
+  if (state.den) qs.set("den", state.den);
+  if (state.cd) qs.set("cd", state.cd);
+  if (state.vc) qs.set("vc", state.vc);
+  if (state.san) qs.set("san", state.san);
+  if (state.ngay) qs.set("ngay", state.ngay);
+  if (state.dc) qs.set("dc", state.dc);
+  const {orders: list, counts, total, people, products, carriers, sans, cds, addresses, no_paid_mark, status_log_since} = await api("/orders?" + qs);
+  renderCdSeg(cds);
+  renderSanSeg(sans);
+  renderVcSeg(carriers);
+  renderByPerson(people);
+  loadBonus();  // số đơn đạt thay đổi khi đơn đổi trạng thái
+  renderByProduct(products);
+  renderByAddr(addresses || []);
+  const sts = ["Đã đặt", "Đã nhận", "Thanh toán", "Hoàn thành", "Đã hủy", "all"];
+  $("#status-seg").innerHTML = sts.map(st => `<button class="${state.status === st ? "on" : ""}" onclick="go('orders',{status:'${st}'})">
+    ${st === "all" ? "Tất cả" : (STATUS[st][0] + " " + st)}${st !== "all" ? `<span class="n">${counts[st]}</span>` : ""}</button>`).join("");
+  $("#orders-total").innerHTML = `${total} đơn` + (state.ngay === "tt" && (state.tu || state.den) ? " theo ngày thanh toán" : "")
+    + (total > list.length ? ` · hiện ${list.length} đơn mới nhất` : "")
+    + (no_paid_mark ? ` · <span title="Trả công trước khi web bắt đầu ghi mốc thời gian đổi trạng thái">⋯ ${no_paid_mark} đơn đã trả công trước ${dmy((status_log_since || "").slice(0, 10)) || "khi có nhật ký"} không có ngày thanh toán</span>` : "");
+  state.orders = Object.fromEntries(list.map(o => [o.id, o]));
+  state.orderList = list;
+  renderOrderCards();
+  for (const o of list) if (state.picked.has(o.id)) state.picked.set(o.id, o);  // số liệu mới nhất
+  renderTrackAll();
+  renderPickbar();
+}
+// lọc theo chiến dịch thưởng: state.cd = id, "-" = đơn không gán chiến dịch, rỗng = tất cả; số = đơn theo bộ lọc + trạng thái + sàn + ĐVVC
+// (chiến dịch đang tắt chỉ hiện khi còn đơn khớp bộ lọc)
+function renderCdSeg(cs) {
+  const box = $("#cd-seg");
+  if (!box) return;
+  cs = cs || [];
+  const all = cs.reduce((a, c) => a + c.don, 0), cur = String(state.cd || "");
+  if (cur && !cs.some(c => String(c.id || "-") === cur)) cs = [...cs, {id: cur === "-" ? "" : cur, ten: cur === "-" ? "" : "chiến dịch #" + cur, don: 0}];
+  box.innerHTML = `<button class="${cur ? "" : "on"}" onclick="go('orders',{cd:''})">🎁 Mọi đơn<span class="n">${all}</span></button>`
+    + cs.map(c => { const v = String(c.id || "-");
+      return `<button class="${v === cur ? "on" : ""}" onclick="go('orders',{cd:'${v}'})" title="${c.id ? (c.active ? "Chiến dịch đang bật" : "Chiến dịch đã tắt") : "Đơn không gán chiến dịch nào"}">
+        ${c.id ? `🎁 ${esc(c.ten)}${c.active ? "" : " 💤"}` : "➖ Không chiến dịch"}<span class="n">${c.don}</span></button>`; }).join("");
+}
+// lọc theo sàn (Shopee / TikTok…): state.san = nguon_don, "-" = đơn chưa ghi sàn, rỗng = tất cả; số = đơn theo bộ lọc + trạng thái + ĐVVC
+function renderSanSeg(ss) {
+  const box = $("#san-seg");
+  if (!box) return;
+  const all = ss.reduce((a, c) => a + c.don, 0);
+  const cur = (state.san || "").toLowerCase();
+  if (state.san && !ss.some(c => (c.ten || "-").toLowerCase() === cur)) ss = [...ss, {ten: state.san === "-" ? "" : state.san, don: 0}];
+  box.innerHTML = `<button class="${state.san ? "" : "on"}" onclick="go('orders',{san:''})">🛒 Mọi sàn<span class="n">${all}</span></button>`
+    + ss.map(c => { const v = c.ten || "-";
+      return `<button class="${v.toLowerCase() === cur ? "on" : ""}" onclick="go('orders',{san:${jsq(v)}})">
+        ${c.ten ? sanTag(c.ten) : "❔ Chưa ghi sàn"}<span class="n">${c.don}</span></button>`; }).join("");
+}
+// lọc theo đơn vị vận chuyển: state.vc = tên ĐVVC, "-" = đơn chưa có ĐVVC, rỗng = tất cả; số = đơn theo bộ lọc + trạng thái
+function renderVcSeg(cs) {
+  const box = $("#vc-seg");
+  if (!box) return;
+  const all = cs.reduce((a, c) => a + c.don, 0);
+  const cur = (state.vc || "").toLowerCase();
+  if (state.vc && !cs.some(c => (c.ten || "-").toLowerCase() === cur)) cs = [...cs, {ten: state.vc === "-" ? "" : state.vc, don: 0}];
+  box.innerHTML = `<button class="${state.vc ? "" : "on"}" onclick="go('orders',{vc:''})">🚚 Mọi ĐVVC<span class="n">${all}</span></button>`
+    + cs.map(c => { const v = c.ten || "-";
+      return `<button class="${v.toLowerCase() === cur ? "on" : ""}" onclick="go('orders',{vc:${jsq(v)}})">
+        ${c.ten ? vcTag(c.ten) : "📭 Chưa có ĐVVC"}<span class="n">${c.don}</span></button>`; }).join("");
+}
+// bảng tổng theo người đặt của các đơn đang lọc; bấm 1 người → tìm đơn của người đó
+function renderByPerson(ps) {
+  const box = $("#by-person");
+  if (!box) return;
+  if (!ps.length) { box.innerHTML = ""; return; }
+  const don = ps.reduce((a, p) => a + p.don, 0), tien = ps.reduce((a, p) => a + p.gia_dat, 0);
+  box.innerHTML = `<details class="card by-person" ${state.byPerson ? "open" : ""} ontoggle="state.byPerson=this.open;save()">
+    <summary><b>👤 Theo người đặt</b><span class="muted">${ps.length} người · ${don} đơn · ${short(tien)}</span></summary>
+    <div class="scroll"><table><tr><th>Người đặt</th><th class="r">Số đơn</th><th class="r">Tổng giá đặt</th></tr>
+      ${ps.map(p => `<tr class="click" onclick="go('orders',{q:${jsq(p.ten)}})" title="Xem đơn của ${esc(p.ten)}">
+        <td>${esc(p.ten || "(chưa ghi tên)")}</td><td class="r">${p.don}</td><td class="r"><b>${short(p.gia_dat)}</b></td></tr>`).join("")}
+      <tr><td><b>Tổng</b></td><td class="r"><b>${don}</b></td><td class="r"><b>${short(tien)}</b></td></tr></table></div>
+  </details>`;
+}
+// thẻ đơn: bình thường theo thứ tự API; bật 🏠 Xếp theo địa chỉ → từng nhóm địa chỉ giống nhau (nhóm nhiều đơn trước),
+// mỗi nhóm có dòng tiêu đề (tên nhóm, số đơn, tổng giá đặt, các cách viết khác); bấm tiêu đề = chỉ xem nhóm đó (?dc=)
+function renderOrderCards() {
+  const box = $("#orders"), list = state.orderList || [];
+  if (!box) return;
+  if (!list.length) { box.innerHTML = '<div class="empty">Không có đơn nào</div>'; return; }
+  if (!state.groupAddr) { box.innerHTML = list.map(orderCard).join(""); return; }
+  const groups = new Map();
+  for (const o of list) {
+    if (!groups.has(o.dc_key)) groups.set(o.dc_key, {key: o.dc_key, ten: o.dc_ten, orders: []});
+    groups.get(o.dc_key).orders.push(o);
+  }
+  const gs = [...groups.values()].sort((a, b) => (a.key === "-") - (b.key === "-") || b.orders.length - a.orders.length);
+  box.innerHTML = gs.map(g => {
+    const tien = g.orders.reduce((a, o) => a + (o.gia_dat || 0), 0);
+    const other = [...new Set(g.orders.map(o => (o.dia_chi || "").trim()))].filter(d => d && d !== g.ten);
+    return `<div class="addr-head click" onclick="go('orders',{dc:${jsq(g.key)}})" title="Chỉ xem nhóm địa chỉ này">
+        <b>${g.key === "-" ? "📭 Chưa có địa chỉ" : "🏠 " + esc(g.ten)}</b><span class="badge b-accent">${g.orders.length} đơn</span>
+        <span class="muted">💰 ${short(tien)}</span>${other.length ? `<span class="muted small">cũng viết: ${other.map(esc).join(" · ")}</span>` : ""}</div>`
+      + g.orders.map(orderCard).join("");
+  }).join("");
+}
+// bảng tổng theo nhóm địa chỉ (địa chỉ giống nhau gom 1 dòng, kèm các cách viết); bấm 1 dòng → chỉ xem đơn nhóm đó
+function renderByAddr(as) {
+  const box = $("#by-addr"), chip = $("#dc-filter");
+  if (chip) {
+    const cur = as.find(a => a.key === state.dc);
+    chip.innerHTML = state.dc ? `<button class="btn primary" onclick="go('orders',{dc:''})" title="Bỏ lọc địa chỉ">
+      ${state.dc === "-" ? "📭 Chưa có địa chỉ" : "🏠 " + esc(cur?.ten || state.dc)} ✕</button>` : "";
+  }
+  if (!box) return;
+  if (!as.length) { box.innerHTML = ""; return; }
+  const don = as.reduce((a, p) => a + p.don, 0), tien = as.reduce((a, p) => a + p.gia_dat, 0);
+  box.innerHTML = `<details class="card by-person" ${state.byAddr ? "open" : ""} ontoggle="state.byAddr=this.open;save()">
+    <summary><b>🏠 Theo địa chỉ</b><span class="muted">${as.filter(a => a.key !== "-").length} nơi · ${don} đơn · ${short(tien)}</span></summary>
+    <div class="scroll"><table><tr><th>Địa chỉ (gom cách viết giống nhau)</th><th class="r">Số đơn</th><th class="r">Tổng giá đặt</th></tr>
+      ${as.map(a => `<tr class="click${a.key === state.dc ? " on" : ""}" onclick="go('orders',{dc:${jsq(a.key === state.dc ? "" : a.key)}})" title="Xem đơn ở địa chỉ này">
+        <td>${a.key === "-" ? "📭 (chưa có địa chỉ)" : esc(a.ten)}${a.cach_viet.length > 1 ? `<div class="muted small">${a.cach_viet.map(esc).join(" · ")}</div>` : ""}</td>
+        <td class="r">${a.don}</td><td class="r"><b>${short(a.gia_dat)}</b></td></tr>`).join("")}
+      <tr><td><b>Tổng</b></td><td class="r"><b>${don}</b></td><td class="r"><b>${short(tien)}</b></td></tr></table></div>
+  </details>`;
+}
+// bảng tổng theo sản phẩm của các đơn đang lọc (số lượng = cộng SL từng đơn); bấm 1 dòng → tìm đơn sản phẩm đó
+function renderByProduct(ps) {
+  const box = $("#by-product");
+  if (!box) return;
+  if (!ps.length) { box.innerHTML = ""; return; }
+  const sum = k => ps.reduce((a, p) => a + p[k], 0), don = sum("don"), sl = sum("sl"), tien = sum("gia_dat");
+  box.innerHTML = `<details class="card by-person" ${state.byProduct ? "open" : ""} ontoggle="state.byProduct=this.open;save()">
+    <summary><b>📦 Theo sản phẩm</b><span class="muted">${ps.length} sản phẩm · ${sl} cái · ${don} đơn · ${short(tien)}</span></summary>
+    <div class="scroll"><table><tr><th>Sản phẩm</th><th class="r">Số lượng</th><th class="r">Số đơn</th><th class="r">Tổng giá đặt</th></tr>
+      ${ps.map(p => `<tr class="click" onclick="go('orders',{q:${jsq(p.ten)}})" title="Xem đơn ${esc(p.ten)}">
+        <td>${esc(p.ten || "(chưa ghi sản phẩm)")}</td><td class="r"><b>${p.sl}</b></td><td class="r">${p.don}</td><td class="r">${short(p.gia_dat)}</td></tr>`).join("")}
+      <tr><td><b>Tổng</b></td><td class="r"><b>${sl}</b></td><td class="r"><b>${don}</b></td><td class="r"><b>${short(tien)}</b></td></tr></table></div>
+  </details>`;
+}
+// 🚚 tra hành trình mọi đơn ⏳ Đã đặt đang hiện (có mã vận đơn tra được, hành trình chưa kết thúc), lần lượt từng đơn,
+// nghỉ TRACK_GAP_MS (+ ngẫu nhiên) giữa 2 lần gọi để không dồn API hãng vận chuyển (GHN hay trả 429)
+const TRACK_GAP_MS = [3000, 5000];
+const trackTargets = () => Object.values(state.orders || {}).filter(o => o.trang_thai === "Đã đặt" && o.api_track && !o.vc_final);
+// GHN bắt captcha nên không tra qua máy chủ được → tra trong Chrome bằng tiện ích (bạn tự giải captcha GHN)
+const ghnTargets = () => Object.values(state.orders || {}).filter(o => o.trang_thai === "Đã đặt" && o.ghn && !o.vc_final);
+// chú thích màu thẻ đơn Đã đặt + số đơn mỗi loại (đơn đang hiện)
+// hãng vận chuyển đã báo giao xong (hành trình lưu kết thúc = đã giao) mà đơn vẫn ⏳ Đã đặt → cần bấm 📦 Đã nhận hàng
+const arrived = o => o.trang_thai === "Đã đặt" && o.vc_delivered;
+function renderShipLegend() {
+  const box = $("#ship-legend");
+  if (!box) return;
+  const c = {arrived: 0, giao: 0, near: 0, has: 0, none: 0};
+  for (const o of Object.values(state.orders || {})) {
+    if (o.trang_thai !== "Đã đặt") continue;
+    c[arrived(o) ? "arrived" : !o.ma_don ? "none" : o.vc_near == 1 && !o.vc_final ? (o.vc_giao ? "giao" : "near") : "has"]++;
+  }
+  box.innerHTML = c.arrived + c.giao + c.near + c.has + c.none ? (c.arrived ? `<span class="lg arrived" title="Hãng báo đã giao, đơn vẫn Đã đặt">✅ Đã giao, chưa bấm nhận <b>${c.arrived}</b></span>` : "")
+    + `<span class="lg near giao">🏍 Đang giao <b>${c.giao}</b></span><span class="lg near">📮 Sắp giao <b>${c.near}</b></span>`
+    + `<span class="lg has">🚚 Có mã <b>${c.has}</b></span><span class="lg none">📭 Chưa có mã <b>${c.none}</b></span>` : "";
+}
+function renderTrackAll() {
+  renderShipLegend();
+  const box = $("#track-all");
+  if (!box) return;
+  const run = state.trackRun;
+  if (run) { box.innerHTML = `<button class="btn" onclick="state.trackRun.stop=true;this.disabled=true">⏹ Dừng · đang tra ${run.i}/${run.n}${run.err ? ` · ${run.err} lỗi` : ""}</button>`; return; }
+  const n = trackTargets().length, g = state.ghnRun, ng = ghnTargets().length;
+  box.innerHTML = (n ? `<button class="btn" onclick="trackAll()" title="Tra lần lượt, nghỉ vài giây giữa các đơn">🚚 Tra hành trình ${n} đơn đã đặt</button>` : "")
+    + (g ? ` <button class="btn" onclick="window.postMessage({qld:'stop'},location.origin);this.disabled=true">⏹ Dừng tra GHN · ${g.i}/${g.n}${g.err ? ` · ${g.err} lỗi` : ""}${g.waiting ? " · ⏸ chờ bạn giải captcha trong tab GHN" : ""}</button>`
+      : ng ? ` <button class="btn" onclick="ghnTrack()" title="GHN bắt captcha: mở trang GHN trong Chrome của bạn (tiện ích), bạn tự bấm xác minh khi GHN hỏi">🧩 Tra ${ng} đơn GHN qua Chrome</button>` : "");
+}
+// items: không truyền = mọi đơn GHN Đã đặt đang hiện (chưa kết thúc); [order] = 1 đơn (nút trong chi tiết đơn)
+function ghnTrack(list) {
+  if (!extReady()) return;
+  if (state.ghnRun || (state.check && !state.check.finished)) return toast("Tiện ích đang chạy, chờ xong lượt này", true);
+  list = (list || ghnTargets()).sort((a, b) => a.id - b.id);
+  if (!list.length) return toast("Không có đơn GHN nào cần tra", true);
+  const items = list.map(o => ({id: o.id, code: (o.ma_don || "").replace(/\s/g, "").toUpperCase(),
+                                phone4: (o.sdt || "").replace(/\D/g, "").slice(-4)}));
+  state.ghnRun = {n: items.length, i: 0, ok: 0, err: 0, waiting: null, single: list.length === 1 ? list[0].id : null};
+  window.postMessage({qld: "ghn", items}, location.origin);
+  toast(`🧩 Đang tra ${items.length} đơn GHN trong Chrome – GHN hỏi xác minh thì bấm ô xác minh trong tab GHN`);
+  renderTrackAll();
+}
+window.addEventListener("message", async e => {
+  const g = state.ghnRun, m = e.data;
+  if (e.source !== window || !m || !g || !["ghn-captcha", "ghn-progress", "ghn-done", "error"].includes(m.qld)) return;
+  if (m.qld === "ghn-captcha") {
+    g.waiting = m.id;
+    toast(`⏸ GHN hỏi xác minh đơn #${m.id}: bấm ô xác minh trong tab GHN vừa mở (chờ tối đa 2 phút)`);
+  } else if (m.qld === "ghn-progress") {
+    g.waiting = null; g.i = m.i;
+    let ok = false;
+    if (m.result?.ok) {
+      try { const r = await fetch(`/api/orders/${m.id}/ghn-data`, {method: "POST", headers: {"Content-Type": "application/json"},
+                                   body: JSON.stringify({data: m.result.data})}); ok = r.ok; } catch {}
+    }
+    ok ? g.ok++ : g.err++;
+    if (g.single && $("#extra")) trackOrder(m.id, true);
+  } else if (m.qld === "ghn-done") {
+    state.ghnRun = null;
+    toast(m.reason === "captcha" ? "⚠️ Dừng tra GHN vì captcha chưa được giải"
+      : `🧩 Tra GHN xong ${g.ok}/${g.n} đơn${g.err ? ` · ${g.err} lỗi` : ""}${m.stopped ? " (đã dừng)" : ""}`, g.err > 0 || m.reason === "captcha");
+    if (state.tab === "orders" && !g.single) loadOrders();
+  } else if (m.qld === "error") {
+    if (!g.i) state.ghnRun = null;
+  }
+  renderTrackAll();
+});
+async function trackAll() {
+  const list = trackTargets().sort((a, b) => a.id - b.id);
+  if (!list.length || state.trackRun) return;
+  const run = state.trackRun = {i: 0, n: list.length, err: 0, stop: false};
+  renderTrackAll();
+  for (const o of list) {
+    if (run.stop) break;
+    run.i++; renderTrackAll();
+    try {  // fetch thẳng (không qua api()) để lỗi 1 đơn không bật toast liên tục
+      const r = await fetch(`/api/orders/${o.id}/track`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) run.err++;
+    } catch { run.err++; }
+    if (run.i < run.n && !run.stop) {
+      const [lo, hi] = TRACK_GAP_MS;
+      await new Promise(res => setTimeout(res, lo + Math.random() * (hi - lo)));
+    }
+  }
+  state.trackRun = null;
+  toast(`🚚 Đã tra ${run.i}/${run.n} đơn${run.err ? ` · ${run.err} đơn lỗi` : ""}${run.stop ? " (đã dừng)" : ""}`, run.err > 0);
+  if (state.tab === "orders") loadOrders(); else renderTrackAll();
+}
+// mốc giờ các bước của đơn (nhật ký đổi trạng thái): 📦 nhận · 💵 thanh toán · ✅ hoàn thành
+const MILESTONES = [["Đã nhận", "📦", "nhận", "Nhận hàng"], ["Thanh toán", "💵", "thanh toán", "Thanh toán công"], ["Hoàn thành", "✅", "hoàn thành", "Hoàn thành (bán)"]];
+// "⏳ đặt 11/11 09:00 · 📦 nhận 12/11 10:15 · 💵 thanh toán … · ✅ hoàn thành …" (trên đầu thẻ đơn + chi tiết đơn)
+function milestoneText(o) {
+  const ms = [[`Ngày tạo đơn ${o.created_at || ""}`, `⏳ đặt ${dt(o.created_at)}`],
+    ...MILESTONES.filter(([st]) => o.moc?.[st]).map(([st, icon, label, title]) =>
+      [`${title} lúc ${o.moc[st]}`, `${icon} ${label} ${dt(o.moc[st])}`])];
+  // dấu · dính vào mốc trước (không rơi lẻ xuống dòng); dấu cách giữa các mốc để xuống dòng được
+  return `<span class="moc">${ms.map(([title, text], i) => `<span title="${esc(title)}">${text}${i < ms.length - 1
+    ? '<i class="sep">·</i>' : ""}</span>`).join(" ")}</span>`;
+}
+function orderCard(o) {
+  const qty = o.so_luong > 1 ? ` <span class="badge b-accent">× ${o.so_luong}</span>` : "";
+  const picked = state.picked.has(o.id);
+  const ship = o.trang_thai !== "Đã đặt" ? "" : arrived(o) ? "ship-arrived" : !o.ma_don ? "ship-none" : o.vc_near == 1 && !o.vc_final ? (o.vc_giao ? "ship-near ship-giao" : "ship-near") : "ship-has";
+  return `<div class="card order ${ship} ${picked ? "picked" : ""}" id="oc-${o.id}" onclick="orderDetail(${o.id})">
+    <div class="top"><label class="pick" onclick="event.stopPropagation()"><input type="checkbox" ${picked ? "checked" : ""}
+        onchange="pickOrder(${o.id},this.checked)"><span class="id"><b>#${o.id}</b> : ${milestoneText(o)}</span></label>${stamp(o.trang_thai)}</div>
+    <div class="title">${esc(o.ten_sp || "(chưa ghi sản phẩm)")}${qty}</div>
+    <div class="meta"><span>👤 ${esc(o.ten_nguoi_dat)}</span>${o.ten_tren_don ? `<span title="Tên trên đơn hàng">🪪 ${esc(o.ten_tren_don)}</span>` : ""}${o.chien_dich_ten ? `<span class="badge b-accent" title="Chiến dịch thưởng săn sale">🎁 ${esc(o.chien_dich_ten)}${o.cd_seq ? ` · đơn thứ ${o.cd_seq.n}` : ""}</span>` : ""}${o.cd_seq?.moc_dat ? milestoneBadge(o.cd_seq) : ""}${o.nguon_don ? sanTag(o.nguon_don) : ""}
+      ${o.nguon_khach ? `<span>📲 ${esc(o.nguon_khach)}</span>` : ""}${o.sdt ? `<span>📞 ${esc(o.sdt)}</span>` : ""}</div>
+    ${o.dia_chi ? `<div class="addr" title="Địa chỉ">🏠 ${esc(o.dia_chi)}</div>` : ""}
+    <div class="tear"></div>
+    <div class="money-row">
+      <div>Giá đặt<b>${short(o.gia_dat)}</b></div><div>Công<b>${short(o.cong_dat)}</b></div>
+      <div>Shop thu<b>${o.gia_thu ? short(o.gia_thu) : "–"}</b></div>
+      <div class="lai">Lãi<b class="${o.margin == null ? "" : o.margin >= 0 ? "pos" : "neg"}">${o.margin == null ? "–" : short(o.margin)}</b></div>
+    </div>
+    ${o.ma_don ? `<div class="track"><span>${vcTag(o.don_vi_vc)} <code class="vc-code" title="Xem hành trình đã lưu (không tra lại hãng)" onclick="event.stopPropagation();savedTrack(${o.id})">${esc(o.ma_don)}</code></span>${o.vc_final ? `<span class="badge ${o.vc_delivered ? "b-done" : "b-cancel"}">${o.vc_delivered ? "✅" : "↩️"} ${esc(o.vc_final)}</span>`
+      : o.vc_status ? `<span class="badge b-paid">🚚 ${esc(o.vc_status)}</span>` : ""}${o.vc_final ? "" : o.vc_near == 1 ? (o.vc_giao ? '<span class="badge near fire">🔥 🏍 Đang giao</span>' : '<span class="badge b-ordered">📮 Sắp giao</span>') : o.vc_near == 2 ? '<span class="badge b-muted">về kho cuối</span>' : o.vc_near == 3 ? '<span class="badge b-muted">sắp tới bưu cục giao</span>' : ""}${o.vc_checked
+      ? `<span class="muted checked" title="Lần tra hành trình gần nhất">🕒 tra ${esc(dt(o.vc_checked))}</span>` : ""}</div>${o.vc_courier
+      ? `<div class="courier" title="Nhân viên giao · ${esc(o.vc_courier.post)} · nhận đi giao ${esc(o.vc_courier.time)}">🧑‍✈️ <b>${esc(o.vc_courier.name)}</b>${o.vc_courier.phone
+        ? ` · <a href="tel:${esc(o.vc_courier.phone)}" onclick="event.stopPropagation()">${esc(o.vc_courier.phone)}</a>` : ""} <span class="muted">· ${esc(o.vc_courier.time)}</span></div>` : ""}` : o.trang_thai === "Đã đặt" ? '<div class="no-vc">📭 Chưa có mã vận đơn</div>' : ""}
+    ${arrived(o) ? '<div class="arrived-note">✅ Hãng báo đã giao tới nơi · nhớ bấm 📦 Đã nhận hàng</div>' : ""}
+    ${o.trang_thai === "Đã đặt" ? `<div class="actions"><button class="btn sm primary" onclick="event.stopPropagation();setStatus(${o.id},'Đã nhận')" title="Đã nhận hàng, chưa trả công">📦 Đã nhận hàng</button></div>`
+      : payable(o) ? `<div class="actions"><button class="btn sm primary" onclick="event.stopPropagation();openPay(${o.id})">💳 Thanh toán công ${short(o.cong_dat)}</button></div>` : ""}
+  </div>`;
+}
+
+// chọn nhiều đơn → thanh tổng ở cuối trang (giữ khi đổi bộ lọc, mất khi tải lại trang)
+function pickOrder(id, on) {
+  if (on) state.picked.set(id, state.orders[id]); else state.picked.delete(id);
+  $(`#oc-${id}`)?.classList.toggle("picked", on);
+  renderPickbar();
+}
+function pickAll() {
+  const all = Object.values(state.orders || {});
+  const on = !all.every(o => state.picked.has(o.id));  // đã chọn hết thì bấm lần nữa = bỏ chọn
+  for (const o of all) on ? state.picked.set(o.id, o) : state.picked.delete(o.id);
+  loadOrders();
+}
+function clearPicked() { state.picked.clear(); loadOrders(); }
+function renderPickbar() {
+  const bar = $("#pickbar");
+  if (!bar) return;
+  const os = [...state.picked.values()];
+  if (!os.length) { bar.innerHTML = ""; return; }
+  const sum = f => os.reduce((a, o) => a + (f(o) || 0), 0);
+  const sold = os.filter(o => o.gia_thu);
+  const chi = o => (o.gia_dat || 0) + (o.cong_dat || 0);
+  const lai = sum(o => o.margin);
+  const cell = (label, v, cls = "") => `<div>${label}<b class="${cls}">${v}</b></div>`;
+  bar.innerHTML = `<div class="pickbar">
+    <div class="head"><b>☑ Đã chọn ${os.length} đơn · ${sum(o => o.so_luong || 1)} cái</b>
+      <span class="actions">${os.some(o => o.trang_thai === "Đã đặt") ? `<button class="btn sm" onclick="receivePicked()" title="Đã nhận hàng, chưa trả công">📦 Đã nhận ${os.filter(o => o.trang_thai === "Đã đặt").length} đơn</button>` : ""}
+        ${os.some(payable) ? `<button class="btn sm primary" onclick="payPicked()">💳 Thanh toán công ${os.filter(payable).length} đơn</button>` : ""}
+        ${state.meta?.campaigns?.length ? `<button class="btn sm" onclick="campaignPicked()">🎁 Gán chiến dịch</button>` : ""}
+        <button class="btn sm" onclick="pickAll()">☑ Chọn hết đang hiện</button>
+        <button class="btn sm" onclick="clearPicked()">✕ Bỏ chọn</button></span></div>
+    <div class="nums">
+      ${cell("🛒 Tiền hàng", short(sum(o => o.gia_dat)))}
+      ${cell("🛠 Công", short(sum(o => o.cong_dat)))}
+      ${cell("💸 Tổng chi", short(sum(chi)))}
+      ${cell(`💰 Shop thu${sold.length < os.length ? ` · ${os.length - sold.length} đơn chưa có giá` : ""}`, short(sum(o => o.gia_thu)))}
+      ${cell("📈 Lãi (đơn có giá shop thu)", sold.length ? short(lai) : "–", lai >= 0 ? "pos" : "neg")}
+    </div></div>`;
+}
+
+// chọn chiến dịch cho đơn: "— Không" + chiến dịch chưa kết thúc (meta) + chiến dịch đơn đang gán (có thể đã kết thúc)
+function campaignOptions(o = {}) {
+  const cs = [...(state.meta?.campaigns || [])];
+  if (o.chien_dich && !cs.some(([id]) => id === o.chien_dich)) cs.push([o.chien_dich, o.chien_dich_ten || "#" + o.chien_dich]);
+  return [["", "— Không thuộc chiến dịch"], ...cs];
+}
+function campaignPicked() {
+  const n = state.picked.size;
+  openModal(`${modalHead(`🎁 Gán chiến dịch · ${n} đơn`)}
+    <div class="form">${field(["chien_dich", "Chiến dịch thưởng", "select", "", {options: campaignOptions(), full: true}])}</div>
+    <div class="foot"><button class="btn" onclick="closeModal()">Hủy</button>
+      <button class="btn primary" onclick="saveCampaignPicked(this)">Gán ${n} đơn</button></div>`);
+}
+async function saveCampaignPicked(btn) {
+  const v = $("#modal-root [name=chien_dich]").value;
+  btn.disabled = true;
+  let done = 0;
+  try { for (const id of [...state.picked.keys()]) { await patch(`/orders/${id}`, {chien_dich: v}); done++; } }
+  finally { toast(`🎁 ${done}/${state.picked.size} đơn → ${v ? $("#modal-root [name=chien_dich]").selectedOptions[0].text : "không thuộc chiến dịch"}`, done < state.picked.size); closeModal(); refresh(); }
+}
+// các đơn Đã đặt đã chọn → Đã nhận (nhận hàng rồi, chưa trả công)
+async function receivePicked() {
+  const os = [...state.picked.values()].filter(o => o.trang_thai === "Đã đặt");
+  let done = 0;
+  try {
+    for (const o of os) { await patch(`/orders/${o.id}`, {trang_thai: "Đã nhận"}); state.picked.delete(o.id); done++; }
+  } finally {
+    toast(`📦 ${done}/${os.length} đơn → Đã nhận`, done < os.length);
+    refresh(true);
+  }
+}
+// trả công gộp nhiều đơn đã chọn: mỗi người đặt 1 QR + tổng công, bấm 1 lần → các đơn Đã nhận của người đó sang Thanh toán
+const nameKey = s => String(s || "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+// thưởng săn sale mới đạt nhờ trả công các đơn này (cùng 1 người đặt): với mỗi chiến dịch của các đơn,
+// số đơn đạt hiện có (Thanh toán / Hoàn thành) + số đơn sắp chuyển sang Thanh toán → số lần qua mốc mới × thưởng.
+// Mốc đã qua từ trước coi như đã trả thưởng ở lần trả công đó (không tính lại).
+// đơn đạt mốc thưởng (đơn thứ 5, 10… của người đặt trong chiến dịch, đã trả công)
+const milestoneBadge = s => `<span class="badge b-done" title="Đơn này làm người đặt đạt mốc ${s.moc} đơn → được thưởng ${money(s.thuong)}">🏆 Đơn mốc ${s.n} · thưởng ${short(s.thuong)}</span>`;
+function payBonus(orders) {
+  const byC = new Map();
+  for (const o of orders) if (o.chien_dich && payable(o)) byC.set(o.chien_dich, (byC.get(o.chien_dich) || 0) + 1);
+  return [...byC].map(([cid, add]) => {
+    const c = state.campaigns?.[cid];
+    if (!c) return null;
+    const p = c.people.find(p => nameKey(p.ten) === nameKey(orders[0].ten_nguoi_dat));
+    const moc = Math.max(c.moc_don || 1, 1), before = p ? p.dat : 0, after = before + add;
+    const lan = Math.floor(after / moc) - Math.floor(before / moc);
+    // đơn nào trong lần trả này là đơn mốc (đơn thứ 5, 10…): xếp theo id như thứ tự bấm trả
+    const mine = orders.filter(o => o.chien_dich === cid && payable(o)).sort((a, b) => a.id - b.id);
+    const hits = mine.map((o, i) => [o, before + i + 1]).filter(([, n]) => n % moc === 0);
+    return {c, add, before, after, lan, bonus: lan * c.thuong, con: moc - after % moc, hits};
+  }).filter(Boolean);
+}
+// dòng thưởng trong bảng trả công + tổng cần chuyển (công + thưởng)
+function payBonusRows(bs) {
+  return bs.map(b => `<tr><td>🎁</td><td style="text-align:left">${esc(b.c.ten)} · ${b.before} → ${b.after} đơn
+      ${b.lan ? `<b class="pos">đạt mốc ${b.c.moc_don}${b.lan > 1 ? ` × ${b.lan}` : ""}</b>
+        <div class="muted">🏆 ${b.hits.map(([o, n]) => `đơn mốc thứ ${n}: #${o.id}`).join(" · ")}</div>` : `<span class="muted">còn ${b.con} đơn tới mốc</span>`}</td>
+    <td class="r">${b.bonus ? `<b class="pos">+${money(b.bonus)}</b>` : "–"}</td></tr>`).join("");
+}
+function payTotal(cong, bs) {
+  const bonus = bs.reduce((a, b) => a + b.bonus, 0);
+  return `<div style="font-size:28px;font-weight:700;margin:6px 0">${money(cong + bonus)}</div>
+    ${bonus ? `<div class="muted" style="margin-bottom:6px">công ${money(cong)} + thưởng ${money(bonus)}</div>` : ""}`;
+}
+async function payPicked() {
+  // số đơn đạt của chiến dịch phải mới nhất (vừa trả công ở chỗ khác…)
+  try { const cs = await api("/campaigns"); state.campaigns = Object.fromEntries(cs.map(c => [c.id, c])); } catch {}
+  const os = [...state.picked.values()].filter(payable);
+  const skipped = state.picked.size - os.length;
+  const groups = new Map();
+  for (const o of os) {
+    const k = nameKey(o.ten_nguoi_dat);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(o);
+  }
+  state.payGroups = [...groups.values()];
+  openModal(`${modalHead(`💳 Thanh toán công · ${os.length} đơn`)}
+    ${skipped ? `<div class="meta">Bỏ qua ${skipped} đơn không ở trạng thái Đã nhận (chỉ trả công đơn đã nhận hàng; đơn Đã đặt bấm 📦 Đã nhận trước)</div>` : ""}
+    ${state.payGroups.map((g, i) => {
+      const q = g.find(o => o.has_qr), cong = g.reduce((a, o) => a + (o.cong_dat || 0), 0), bs = payBonus(g);
+      return `<div class="card pay" style="margin-top:12px;text-align:center">
+        <div class="meta" style="justify-content:center">Trả công cho <b>&nbsp;${esc(g[0].ten_nguoi_dat)}</b>&nbsp;· ${g.length} đơn</div>
+        ${payTotal(cong, bs)}
+        <table style="margin:0 auto 8px;font-size:13px">${g.map(o => `<tr><td>#${o.id}</td><td style="text-align:left">${esc(o.ten_sp || "")}${o.so_luong > 1 ? ` × ${o.so_luong}` : ""}</td>
+          <td class="r">${money(o.cong_dat)}</td></tr>`).join("")}${payBonusRows(bs)}</table>
+        ${q ? qrImg("order", q.id, q.qr_v) : '<div class="empty">Người này chưa có ảnh QR – mở 1 đơn để tải QR lên</div>'}
+        <div class="foot" style="justify-content:center">${q ? qrDownload("order", q.id, q.qr_v) : ""}
+          <button class="btn ok" onclick="payGroupDone(${i}, this)">✅ Đã trả công ${g.length} đơn</button></div>
+      </div>`;
+    }).join("") || '<div class="empty">Không có đơn Đã nhận nào trong các đơn đã chọn</div>'}`);
+}
+async function payGroupDone(i, btn) {
+  const g = state.payGroups[i];
+  if (!g?.length) return;
+  btn.disabled = true;
+  let done = 0;
+  try {
+    for (const o of g) { await patch(`/orders/${o.id}`, {trang_thai: "Thanh toán"}); state.picked.delete(o.id); done++; }
+  } finally {
+    toast(`💵 ${done}/${g.length} đơn của ${g[0].ten_nguoi_dat} → Thanh toán`, done < g.length);
+    state.payGroups[i] = g.slice(done);  // lỗi giữa chừng → giữ các đơn còn lại để bấm lại
+    if (done === g.length) btn.closest(".card").remove();
+    else { btn.disabled = false; btn.textContent = `✅ Đã trả công ${g.length - done} đơn còn lại`; }
+    if (!$("#modal-root .card.pay")) closeModal();
+    refresh(true);
+  }
+}
+// khoảng giữa 2 mốc "YYYY-MM-DD HH:MM:SS": "2 ngày 3 giờ" / "45 phút"
+function durText(a, b) {
+  const p = s => new Date(s.replace(" ", "T"));
+  const secs = Math.max(0, (p(b) - p(a)) / 1000), d = Math.floor(secs / 86400), h = Math.floor(secs % 86400 / 3600), m = Math.floor(secs % 3600 / 60);
+  return [d && `${d} ngày`, h && `${h} giờ`, !d && m && `${m} phút`].filter(Boolean).join(" ") || "dưới 1 phút";
+}
+// các mốc đổi trạng thái (db.order_status_log): tạo đơn = Đã đặt, rồi từng lần đổi kèm giờ, sau bao lâu, ai đổi
+function statusTimeline(o) {
+  const logs = o.status_log || [];
+  const item = (st, at, note) => `<li style="--dot:${ST_COLOR[st] || "var(--muted)"}">${(STATUS[st] || ["•"])[0]} <b>${esc(st)}</b>
+    · ${dmy(at.slice(0, 10))} ${at.slice(11, 16)}${note ? ` <span class="muted">· ${note}</span>` : ""}</li>`;
+  const gap = logs.length ? logs[0].tu !== "Đã đặt" : o.trang_thai !== "Đã đặt";
+  let prev = o.created_at;
+  return `<div class="section-title" style="margin-top:14px">🕒 Các mốc trạng thái</div><ul class="st-timeline">
+    ${item("Đã đặt", o.created_at, "tạo đơn")}
+    ${gap ? `<li style="--dot:var(--line)"><span class="muted">⋯ đổi trạng thái trước ${o.status_log_since ? dmy(o.status_log_since.slice(0, 10)) : "khi có nhật ký"} chưa có mốc giờ</span></li>` : ""}
+    ${logs.map(g => { const r = item(g.den, g.at, ["sau " + durText(prev, g.at), [g.nguon, g.nguoi].filter(Boolean).map(esc).join(" ")].filter(Boolean).join(" · ")); prev = g.at; return r; }).join("")}
+  </ul>`;
+}
+async function orderDetail(id) {
+  const o = await api(`/orders/${id}`);
+  state.orders = {...state.orders, [id]: o};
+  const row = (k, v) => v ? `<tr><th>${k}</th><td>${v}</td></tr>` : "";
+  const acts = [];
+  if (o.trang_thai === "Đã đặt") acts.push(`<button class="btn primary" onclick="setStatus(${id},'Đã nhận')" title="Đã nhận hàng, chưa trả công">📦 Đã nhận hàng</button>`);
+  if (payable(o)) acts.push(`<button class="btn primary" onclick="payView(${id})">💳 Thanh toán công</button>`);
+  if (o.trang_thai === "Thanh toán") acts.push(`<button class="btn ok" onclick="sellForm(${id})">✅ Bán / Hoàn thành</button>`);
+  if (o.trang_thai !== "Đã hủy" && o.trang_thai !== "Hoàn thành") acts.push(`<button class="btn bad" onclick="setStatus(${id},'Đã hủy')">❌ Hủy đơn</button>`);
+  else if (o.trang_thai === "Đã hủy") acts.push(`<button class="btn" onclick="setStatus(${id},'Đã đặt')">↩ Khôi phục</button>`);
+  openModal(`${modalHead(`Đơn #${o.id} ${badge(o.trang_thai)}`)}
+    <div class="meta">${milestoneText(o)}</div>
+    <table style="margin-top:10px">
+      ${row("Sản phẩm", esc(o.ten_sp) + (o.so_luong > 1 ? ` × ${o.so_luong}` : ""))}
+      ${row("Người đặt", esc(o.ten_nguoi_dat))}${row("Tên trên đơn", esc(o.ten_tren_don || ""))}${row("Chiến dịch thưởng", o.chien_dich_ten ? "🎁 " + esc(o.chien_dich_ten) + (o.cd_seq ? ` · đơn thứ ${o.cd_seq.n}` : "") + (o.cd_seq?.moc_dat ? " " + milestoneBadge(o.cd_seq) : "") : "")}
+      ${row("Nguồn", [o.nguon_khach, o.nguon_don].filter(Boolean).map(esc).join(" → "))}
+      ${row("Giá đặt", money(o.gia_dat))}${row("Công đặt", money(o.cong_dat))}
+      ${row("Giá shop thu", o.gia_thu ? money(o.gia_thu) + (o.so_luong > 1 ? ` <span class="meta">(${short(o.gia_thu / o.so_luong)}/cái)</span>` : "") : (o.gia_goi_y ? `<span class="meta">gợi ý ${esc(o.gia_goi_y)}/cái</span>` : ""))}
+      ${row("Lãi", o.margin == null ? "" : `<b class="${o.margin >= 0 ? "pos" : "neg"}">${money(o.margin)}</b>`)}
+      ${row("SĐT", esc(o.sdt))}${row("Địa chỉ", esc(o.dia_chi))}
+      ${row("Vận chuyển", o.don_vi_vc || o.ma_don ? [o.don_vi_vc ? vcTag(o.don_vi_vc) : "", o.ma_don ? `<code class="vc-code" title="Xem hành trình đã lưu (không tra lại hãng)" onclick="trackOrder(${id},true)">${esc(o.ma_don)}</code>` : ""].filter(Boolean).join(" ") : "")}
+    </table>
+    ${statusTimeline(o)}
+    <div id="extra"></div>
+    <div class="foot">
+      <div class="left actions">
+        ${o.trackable ? `<button class="btn sm" onclick="trackOrder(${id})">🚚 Hành trình</button>` : ""}
+        <button class="btn sm" onclick="showQr('order',${id})">🔳 ${o.has_qr ? "QR trả công" : "Thêm QR"}</button>
+        <button class="btn sm" onclick="orderForm(${id})">✏️ Sửa</button>
+        <button class="btn sm bad" onclick="removeRec('orders',${id})">🗑</button>
+      </div>
+      ${acts.join("")}
+    </div>`);
+}
+// như nút 💳 THANH TOÁN CÔNG của bot: hiện QR người đặt + số công, quét xong bấm Đã trả công
+async function openPay(id) { await orderDetail(id); payView(id); }
+async function payView(id) {
+  try { const cs = await api("/campaigns"); state.campaigns = Object.fromEntries(cs.map(c => [c.id, c])); } catch {}
+  const o = state.orders[id], bs = payBonus([o]);
+  $("#extra").innerHTML = `<div class="card pay" style="margin-top:12px;text-align:center">
+    <div class="meta" style="justify-content:center">Trả công cho <b>&nbsp;${esc(o.ten_nguoi_dat)}</b>&nbsp;· đơn #${o.id}</div>
+    ${payTotal(o.cong_dat || 0, bs)}
+    ${bs.length ? `<table style="margin:0 auto 8px;font-size:13px">${payBonusRows(bs)}</table>` : ""}
+    ${o.has_qr ? qrImg("order", id, o.qr_v) : '<div class="empty">Người này chưa có ảnh QR</div>'}
+    <div class="foot" style="justify-content:center">${o.has_qr ? qrDownload("order", id, o.qr_v) : ""}
+      <button class="btn sm" onclick="pickQr('order',${id},'pay')">📷 ${o.has_qr ? "Đổi ảnh QR" : "Tải ảnh QR lên"}</button>
+      <button class="btn ok" onclick="setStatus(${id},'Thanh toán')">✅ Đã trả công</button></div>
+  </div>`;
+  $("#extra").scrollIntoView({behavior: "smooth", block: "nearest"});
+}
+async function setStatus(id, st) {
+  if (st === "Đã hủy" && !confirm(`Chuyển đơn #${id} sang Đã hủy?`)) return;
+  await patch(`/orders/${id}`, {trang_thai: st});
+  toast(`#${id} → ${st}`); closeModal(); refresh();
+}
+function sellForm(id) {
+  const o = state.orders?.[id];
+  const qty = o?.so_luong || 1;
+  $("#extra").innerHTML = `<div class="form">${field(["price", qty > 1 ? `Giá shop thu 1 cái (× ${qty})` : "Giá shop thu", "money",
+      o?.gia_thu ? short(o.gia_thu / qty) : "", {ph: o?.gia_goi_y ? "gợi ý " + o.gia_goi_y : "vd 4tr5", qty, full: true}])}</div>
+    <div class="foot"><button class="btn ok" onclick="sell(${id})">Xác nhận Hoàn thành</button></div>`;
+  $("#extra input").focus();
+}
+async function sell(id) {
+  await post(`/orders/${id}/sell`, {price: $("#extra [name=price]").value});
+  toast(`#${id} ✅ Hoàn thành`); closeModal(); refresh();
+}
+// bấm mã vận đơn → mở đơn + hành trình đã lưu trong DB (track_logs), không gọi API hãng
+async function savedTrack(id) {
+  await orderDetail(id);
+  trackOrder(id, true);
+}
+async function trackOrder(id, saved = false) {
+  $("#extra").innerHTML = `<div class="empty">⏳ ${saved ? "Đang mở hành trình đã lưu…" : "Đang tra hành trình…"}</div>`;
+  let r; try { r = await api(`/orders/${id}/track${saved ? "?saved=1" : ""}`); } catch { $("#extra").innerHTML = ""; return; }
+  const again = r.from_db && r.api_track && !r.final
+    ? ` <button class="btn sm" onclick="trackOrder(${id})">🔄 Tra lại từ hãng</button>`
+    : r.ghn && !r.final && state.orders?.[id] ? ` <button class="btn sm" onclick="ghnTrack([state.orders[${id}]])" title="GHN bắt captcha: tra trong Chrome bằng tiện ích">🧩 Tra lại qua Chrome</button>` : "";
+  const note = r.stale ? `⚠️ Tra lại lỗi – đang xem bản lưu lúc ${dtFull(r.saved_at)}, có thể đã cũ`
+    : !r.from_db ? (r.saved_at ? `💾 Hành trình đã kết thúc · bản lưu lúc ${dtFull(r.saved_at)} (không tra lại hãng)` : "")
+    : r.saved_at ? `💾 Bản lưu lúc ${dtFull(r.saved_at)}${r.final ? " · hành trình đã kết thúc" : ""}` : "";
+  $("#extra").innerHTML = `<div class="card" style="margin-top:12px">
+    <h3>🚚 ${esc(r.carrier)} ${esc(r.code)} ${r.milestone ? `· <span class="badge b-accent">${esc(r.milestone)}</span>` : ""}</h3>
+    ${r.eta ? `<div class="meta">Dự kiến giao: ${r.eta}</div>` : ""}
+    ${r.error ? `<div class="meta">${esc(r.error)}</div>` : ""}
+    ${r.web_url ? `<a class="btn sm" target="_blank" href="${esc(r.web_url)}">Mở trang tra cứu ↗</a>` : ""}
+    ${note || again ? `<div class="meta">${note}${again}</div>` : ""}
+    <ul class="timeline">${r.events.map(e => `<li><div class="t">${e.time}${e.location ? " · " + esc(e.location) : ""}</div>${esc(e.text)}</li>`).join("")}</ul>
+  </div>`;
+}
+// ?v= đổi theo ảnh → đổi QR là trình duyệt tải ảnh mới, không hiện ảnh cũ đã nhớ
+const qrImg = (kind, id, v) => `<img class="qr" style="max-width:320px;width:100%" src="/api/qr/${kind}/${id}?v=${v}" alt="QR"
+  onerror="this.outerHTML='<div class=empty>Không tải được ảnh QR</div>'">`;
+const qrDownload = (kind, id, v) => `<a class="btn sm" href="/api/qr/${kind}/${id}?download=1&v=${v}" download>⬇️ Tải ảnh QR</a>`;
+function showQr(kind, id) {
+  const r = (kind === "person" ? state.people : state.orders)?.[id] || {};
+  const html = `<div style="text-align:center">${r.has_qr ? qrImg(kind, id, r.qr_v)
+      : '<div class="empty">Chưa có ảnh QR – tải ảnh lên ở đây, bot cũng dùng được luôn</div>'}</div>
+    <div class="foot" style="justify-content:center;margin-top:4px">${r.has_qr ? qrDownload(kind, id, r.qr_v) : ""}
+      <button class="btn sm ${r.has_qr ? "" : "primary"}" onclick="pickQr('${kind}',${id},'show')">📷 ${r.has_qr ? "Đổi ảnh QR" : "Tải ảnh QR lên"}</button>
+      ${r.has_qr ? `<button class="btn sm bad" onclick="deleteQr('${kind}',${id})">🗑 Xóa QR</button>` : ""}</div>`;
+  if (kind === "order" && $("#extra")) $("#extra").innerHTML = html;
+  else openModal(modalHead("🔳 QR trả công" + (kind === "person" ? " · " + esc(r.ten || "") : "")) + html);
+}
+// QR lưu theo người đặt (dùng chung mọi đơn của người đó, bot đọc cùng chỗ)
+async function afterQr(kind, id, then) {
+  if (kind === "person") { await viewPeople(); showQr("person", id); return; }
+  await orderDetail(id);
+  then === "pay" ? payView(id) : showQr("order", id);
+  if (state.tab === "orders") loadOrders();
+}
+function pickQr(kind, id, then) {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "image/*";
+  inp.onchange = async () => {
+    const f = inp.files[0];
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) { toast("Ảnh lớn quá 10MB", true); return; }
+    toast("⏳ Đang tải ảnh lên…");
+    const res = await fetch(`/api/qr/${kind}/${id}`, {method: "POST", headers: {"Content-Type": f.type || "image/jpeg"}, body: f});
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(d.detail || "Lỗi " + res.status, true); return; }
+    toast("✅ Đã lưu QR – dùng chung cho mọi đơn của người này, bot cũng thấy");
+    afterQr(kind, id, then);
+  };
+  inp.click();
+}
+async function deleteQr(kind, id) {
+  if (!confirm("Xóa ảnh QR của người này (mọi đơn)?")) return;
+  await del(`/qr/${kind}/${id}`);
+  toast("🗑 Đã xóa QR"); afterQr(kind, id, "show");
+}
+
+function orderForm(id) {
+  const o = id ? state.orders[id] : {};
+  const m = state.meta, qty = o.so_luong || 1;
+  const orig = {...o, gia_dat: o.gia_dat ? short(o.gia_dat) : "", cong_dat: o.cong_dat ? short(o.cong_dat) : "",
+                gia_thu: o.gia_thu ? short(o.gia_thu / qty) : "", so_luong: o.so_luong ?? ""};
+  const fields = [
+    ["ten_sp", "Tên sản phẩm", "text", orig.ten_sp, {list: m.products, full: true}],
+    ["ten_nguoi_dat", "Người đặt *", "text", orig.ten_nguoi_dat, {list: m.people, hint: true}],
+    ["so_luong", "Số lượng", "num", orig.so_luong, {ph: "1"}],
+    ["nguon_khach", "Nguồn khách", "text", orig.nguon_khach, {list: m.nguon_khach}],
+    ["nguon_don", "Sàn", "text", orig.nguon_don, {list: m.nguon_don}],
+    ["gia_dat", "Giá đặt", "money", orig.gia_dat, {ph: "vd 4tr3"}],
+    ["cong_dat", "Công đặt", "money", orig.cong_dat, {ph: "vd 100k"}],
+    ["gia_thu", qty > 1 ? `Giá shop thu 1 cái (× ${qty})` : "Giá shop thu", "money", orig.gia_thu, {qty, ph: o.gia_goi_y ? "gợi ý " + o.gia_goi_y : ""}],
+    ["ten_tren_don", "🪪 Tên trên đơn hàng", "text", orig.ten_tren_don, {list: [], ph: "tên ghi trên đơn Shopee/TikTok"}],
+    ["chien_dich", "🎁 Chiến dịch thưởng", "select", o.chien_dich ?? "", {options: campaignOptions(o)}],
+    ["sdt", "SĐT", "text", orig.sdt, {list: [], full: true, hint: true}],
+    ["dia_chi", "Địa chỉ", "text", orig.dia_chi, {full: true, list: []}],
+    ["ma_don", "Mã vận đơn", "text", orig.ma_don],
+    ["don_vi_vc", "Đơn vị vận chuyển", "text", orig.don_vi_vc, {list: m.carriers}],
+  ];
+  if (id) fields.push(["trang_thai", "Trạng thái", "select", o.trang_thai, {options: o.next_statuses || m.statuses}]);
+  openModal(`${modalHead(id ? `✏️ Sửa đơn #${id}` : "＋ Thêm đơn")}
+    <div class="meta">Tiền gõ như bot: 4tr3, 150k, 150 (= 150k)</div>
+    <div class="form">${fields.map(field).join("")}</div>
+    <div class="foot"><button class="btn" onclick="${id ? `orderDetail(${id})` : "closeModal()"}">Hủy</button>
+      <button class="btn primary" onclick="saveOrder(${id || 0})">${id ? "Lưu" : "Thêm đơn"}</button></div>`);
+  saveOrder.orig = orig;
+  const who = $("#modal-root [name=ten_nguoi_dat]");
+  who.addEventListener("input", () => { clearTimeout(who._t); who._t = setTimeout(() => fillFromPerson(!id), 300); });
+  fillFromPerson(false);  // sửa đơn: chỉ nạp gợi ý SĐT / địa chỉ, không đè dữ liệu
+  if (!id) {
+    const sp = $("#modal-root [name=ten_sp]");
+    sp.addEventListener("input", fillProductPrice);
+    sp.addEventListener("change", fillProductPrice);
+  }
+}
+// thêm đơn: sản phẩm có 1 giá thu gợi ý (/sanpham) → điền giá shop thu 1 cái (server nhân số lượng) nếu ô trống
+// hoặc do lần tự điền trước điền; giá là khoảng thì chỉ hiện gợi ý
+function fillProductPrice() {
+  const f = n => $(`#modal-root [name=${n}]`);
+  const el = f("gia_thu");
+  if (!el) return;
+  const [lo, hi] = state.meta.product_prices?.[f("ten_sp").value.trim().toLowerCase().split(/\s+/).join(" ")] || [];
+  el.placeholder = lo ? "gợi ý " + (hi && hi !== lo ? `${short(lo)} - ${short(hi)}` : short(lo)) : "";
+  if (el.value !== "" && el.value !== el.dataset.auto) return;
+  el.value = lo && (!hi || hi === lo) ? short(lo) : "";
+  el.dataset.auto = el.value;
+  moneyHint(el);
+}
+// người đặt đã có → lấy nguồn khách, SĐT, địa chỉ của đơn gần nhất (giống bot). Chỉ điền ô trống
+// hoặc ô do lần tự điền trước điền (đổi người khác thì điền lại theo người mới).
+async function fillFromPerson(fill) {
+  const f = n => $(`#modal-root [name=${n}]`);
+  const name = f("ten_nguoi_dat")?.value.trim();
+  const hint = f("ten_nguoi_dat")?.parentElement.querySelector(".hint");
+  const d = name ? await api(`/people/defaults?name=${encodeURIComponent(name)}`).catch(() => ({})) : {};
+  if (!f("ten_nguoi_dat")) return;  // đã đóng form
+  for (const k of ["ten_tren_don", "sdt", "dia_chi"]) $(`#dl-${k}`).innerHTML = (d[k + "s"] || []).map(v => `<option value="${esc(v)}">`).join("");
+  renderPhoneSuggest(d);
+  const filled = [];
+  if (fill) for (const k of ["nguon_khach", "ten_tren_don", "sdt", "dia_chi"]) {
+    const el = f(k);
+    if (el.value === "" || el.value === el.dataset.auto) {
+      el.value = d[k] || ""; el.dataset.auto = el.value;
+      if (d[k]) filled.push(d[k]);
+    }
+  }
+  if (hint) hint.textContent = d.ten ? `👤 Đã có · ${d.so_don} đơn${d.has_qr ? " · có QR" : ""}` +
+    (filled.length ? ` · điền theo đơn gần nhất: ${filled.join(" · ")}` : "") : (name ? "＋ người mới" : "");
+}
+// dưới ô SĐT: mọi số người đặt này từng dùng (gần nhất trước) + kết quả từng số; bấm = điền số đó
+function renderPhoneSuggest(d) {
+  const box = $("#modal-root [name=sdt]")?.parentElement.querySelector(".hint");
+  if (!box) return;
+  const list = d.phones || [];
+  box.innerHTML = list.length ? `<span class="muted">👤 ${esc(d.ten)} từng dùng ${list.length} số – bấm để điền:</span>
+    <span class="phone-sug">${list.map(p => {
+      const res = [["ok", "✅"], ["wait", "⏳"], ["fail", "❌"]].filter(([k]) => p[k]).map(([k, i]) => i + p[k]).join(" ");
+      const tip = `${p.so_don} đơn · lần cuối ${p.last.slice(8, 10)}/${p.last.slice(5, 7)}` + (p.cua_toi ? ` · số của tôi${p.may ? " – " + p.may : ""}` : "")
+        + (p.dang_dung ? " · đang dùng cho đơn chưa xong" : "");
+      return `<button type="button" class="chip-btn" title="${esc(tip)}" onclick="pickPhone(this, ${jsq(p.sdt)})">
+        ${p.cua_toi ? "📱 " : ""}<b>${esc(p.sdt)}</b> <span class="muted">${p.so_don} đơn${res ? " · " + res : ""}${p.dang_dung ? " · 🔴" : ""}</span></button>`;
+    }).join("")}</span>` : "";
+}
+function pickPhone(btn, sdt) {
+  const el = $("#modal-root [name=sdt]");
+  el.value = sdt; el.dataset.auto = "";
+  btn.parentElement.querySelectorAll(".chip-btn").forEach(b => b.classList.toggle("on", b === btn));
+}
+async function saveOrder(id) {
+  if (id) {
+    const body = changed(saveOrder.orig);
+    // đổi số lượng trước để giá shop thu nhân đúng số lượng mới
+    const ordered = Object.fromEntries(Object.entries(body).sort(([a], [b]) => (b === "so_luong") - (a === "so_luong")));
+    if (!Object.keys(ordered).length) { orderDetail(id); return; }
+    await patch(`/orders/${id}`, ordered);
+    toast("✏️ Đã lưu"); orderDetail(id);
+  } else {
+    const o = await post("/orders", formData());
+    toast(`➕ Đã thêm đơn #${o.id}`); closeModal(); refreshMeta();
+  }
+  refresh(true);
+}
+async function removeRec(table, id) {
+  if (!confirm(`Xóa #${id}? Không hoàn tác được.`)) return;
+  await del(`/${table}/${id}`); toast("🗑 Đã xóa"); closeModal(); refresh();
+}
+function refresh(keepModal) {
+  const fn = {home: viewHome, orders: loadOrders, sales: loadSales, products: viewProducts, people: viewPeople, phones: viewPhones, addresses: loadAddresses, lastmile: viewLastMile, users: viewUsers}[state.tab];
+  fn && fn();
+}
+
+// ---------- săn sale ----------
+function viewSales() {
+  $("#view").innerHTML = `
+    <div class="toolbar">
+      <input class="input grow" placeholder="🔍 Tìm sản phẩm / shop…" value="${esc(state.saleQ)}"
+        oninput="clearTimeout(this._t);this._t=setTimeout(()=>{state.saleQ=this.value;loadSales()},300)">
+      <label class="btn" style="display:flex;gap:8px;align-items:center">
+        <span class="switch"><input type="checkbox" ${state.saleAll ? "checked" : ""} onchange="state.saleAll=this.checked;save();loadSales()"><span></span></span>
+        Cả món hết sale</label>
+      <button class="btn" onclick="setAllSales(1)">✅ Bật hết</button>
+      <button class="btn" onclick="setAllSales(0)">⛔ Tắt hết</button>
+      <button class="btn" onclick="checkStock()">📦 Kiểm tra còn hàng</button>
+      <button class="btn" id="stock-list" onclick="stockModal()">📋 Kết quả kiểm tra</button>
+    </div>
+    <div class="toolbar" id="sale-groups"></div>
+    <div id="sales" class="grid cards"></div>
+    <button class="btn primary fab" onclick="saleForm()">＋ Thêm sale</button>`;
+  loadSales();
+}
+async function loadSales() {
+  let list = await api(`/sales?all=${state.saleAll ? 1 : 0}${state.saleQ ? "&q=" + encodeURIComponent(state.saleQ) : ""}`);
+  state.sales = Object.fromEntries(list.map(s => [s.id, s]));
+  // nhóm sale (/sale 1 trên bot): lọc ngay trên trình duyệt, nút từng nhóm kèm số món
+  const nhoms = [...new Set(list.map(s => s.nhom || 0))].sort((a, b) => (a || 1e9) - (b || 1e9));
+  if (state.saleGroup !== "" && !nhoms.includes(+state.saleGroup)) state.saleGroup = "";
+  const gbox = $("#sale-groups");
+  if (gbox) gbox.innerHTML = nhoms.some(n => n) ? `<div class="seg">${[["", "Tất cả", list.length],
+      ...nhoms.map(n => [String(n), n ? `🗂 Nhóm ${n}` : "Chưa chia nhóm", list.filter(s => (s.nhom || 0) === n).length])]
+    .map(([k, l, c]) => `<button class="${state.saleGroup === k ? "on" : ""}" onclick="state.saleGroup='${k}';save();loadSales()">${l}<span class="n">${c}</span></button>`).join("")}</div>
+    <span class="muted">bot: /sale 1 · /nhomsale</span>` : "";
+  if (state.saleGroup !== "") list = list.filter(s => (s.nhom || 0) === +state.saleGroup);
+  const groups = new Map();
+  for (const s of list) {
+    const k = s.ten_sp.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(s);
+  }
+  $("#sales").innerHTML = [...groups.values()].map(g => `
+    <div class="card product">
+      <div class="head"><b>${esc(g[0].ten_sp)}</b><span class="badge b-muted">${g.length} shop</span></div>
+      ${g.map(s => saleShopRow(s)).join("")}
+    </div>`).join("") || `<div class="empty">Không có món sale nào${state.saleAll ? "" : " đang chạy"}</div>`;
+  const bad = stockItems(true).length, btn = $("#stock-list");
+  if (btn) btn.textContent = `📋 Kết quả kiểm tra${bad ? ` · ⚠️ ${bad} lỗi` : ""}`;
+}
+// 1 shop của 1 món sale (dùng ở tab Săn sale và Sản phẩm). price = giá thu gợi ý của sản phẩm → lãi ước tính / cái
+// thứ tự ưu tiên món sale: 1, 2, 3… lên đầu; 0 = chưa xếp → sau cùng
+const rankOf = s => s.uu_tien > 0 ? s.uu_tien : Infinity;
+const mid = (lo, hi) => (lo + (hi || lo)) / 2;
+// 1 mức giá / công đã lưu → số ước tính: khoảng → giữa, "dưới X" (lo 0) → X, "từ X trở lên" (hi = -1) → X
+const est = (lo, hi) => !hi || hi < 0 ? (lo || 0) : !lo ? hi : (lo + hi) / 2;
+function saleShopRow(s, price) {
+  // lãi ~ = giữa giá shop thu gợi ý (1 cái) × SL − giá mua (cả SL cái) − công ("dưới X" → X, "từ X trở lên" → X)
+  const qty = Math.max(1, s.so_luong || 1), per = qty > 1 ? ` (${qty} cái)` : "";
+  const laiOf = t => price && (t.gia_sale || t.gia_sale_max) ? mid(price.gia_goi_y, price.gia_goi_y_max) * qty - est(t.gia_sale, t.gia_sale_max) - est(t.cong, t.cong_max) : null;
+  const lai = laiOf(s);
+  return `<div class="shop ${s.active ? "" : "off"}">
+        <div class="line1"><span>🏪 <b>${esc(s.shop || "chưa ghi shop")}</b> <span class="meta" style="display:inline">#${s.id}</span>${s.uu_tien
+            ? ` <span class="badge b-ordered" title="Thứ tự ưu tiên">🔝 ${s.uu_tien}</span>` : ""}${s.nhom
+            ? ` <span class="badge b-muted" title="Nhóm sale (bot: /sale ${s.nhom})">🗂 nhóm ${s.nhom}</span>` : ""}${stockBadge(s)}</span>
+          <label class="switch" title="${s.active ? "Đang sale" : "Hết sale"}"><input type="checkbox" ${s.active ? "checked" : ""}
+            onchange="toggleSale(${s.id},this.checked)"><span></span></label></div>
+        <div class="meta">${s.gia_label ? `<span>💰 ${esc(s.gia_label)}</span>` : ""}${s.gia_goc_label
+            ? `<span>🏷 gốc ${esc(s.gia_goc_label)}${s.pct ? ` · <b class="pos">−${s.pct}%</b>${s.giam_pt && s.giam_toi_da_label ? ` tối đa ${esc(s.giam_toi_da_label)}` : ""}` : ""}</span>` : ""}${s.cong_label ? `<span>🛠 công ${esc(s.cong_label)}</span>` : ""}
+          ${s.so_luong ? `<span>📦 SL ${s.so_luong}</span>` : ""}${lai !== null ? `<span class="${lai >= 0 ? "pos" : "neg"}">📈 lãi ~${short(lai)}${per}</span>` : ""}</div>
+        ${s.tiers.map(t => {
+          const l = laiOf(t);
+          return `<div class="meta"><span>💰 hoặc ${esc(t.gia_label)}${t.pct ? ` <b class="pos">−${t.pct}%</b>${t.cap_label ? ` tối đa ${esc(t.cap_label)}` : ""}` : ""}</span>${t.cong_label ? `<span>🛠 công ${esc(t.cong_label)}</span>` : ""}${l !== null ? `<span class="${l >= 0 ? "pos" : "neg"}">📈 lãi ~${short(l)}${per}</span>` : ""}</div>`;
+        }).join("")}
+        <div class="links">${s.links.map((u, i) => `<div class="lk"><a href="${esc(u)}" target="_blank" rel="noopener">🔗 ${esc(u.replace(/^https?:\/\//, ""))}</a>${stockChip(s, i)}<button class="lk-del" title="Xóa link này" onclick="removeLink(${s.id},${i})">🗑</button></div>`).join("")}</div>
+        <div class="actions">
+          <button class="btn sm" onclick="addLinkForm(${s.id})">➕ Thêm link</button>
+          <button class="btn sm" onclick="saleForm(${s.id})">✏️ Sửa</button>
+          <button class="btn sm" onclick="saleForm(0, ${s.id})">🏪 Thêm shop</button>
+          <button class="btn sm bad" onclick="removeRec('sales',${s.id})">🗑</button>
+        </div>
+      </div>`;
+}
+// ---------- còn hàng TikTok (tiện ích Chrome static/extension đọc trang trong Chrome của người dùng) ----------
+const isTikTok = u => /^https?:\/\/([^/]*\.)?tiktok\.com\//i.test(u);
+// v = stock_view của server: còn hàng tính theo phân loại cần mua (🎯 đã chọn / tự đoán theo tên sale / tổng)
+function stockText(r, v) {
+  if (!r.ok) return r.captcha ? ["⚠️ cần xác minh", "b-ordered"] : ["⚠️ lỗi", "b-muted"];
+  v = v || {total: r.total, in_stock: r.in_stock, names: []};
+  const which = v.names?.length ? ` · ${v.mode === "auto" ? "🔮" : "🎯"} ${v.names.join(", ")}` : "";
+  return [(v.in_stock ? `📦 còn ${v.total}` : "⛔ hết hàng") + which, v.in_stock ? "b-done" : "b-cancel"];
+}
+function stockChip(s, i) {
+  const u = s.links[i], r = (s.stock || {})[u];
+  if (!r) return "";
+  const [t, cls] = stockText(r, (s.stock_view || {})[u]);
+  return `<button class="badge ${cls} stock-chip" title="Kiểm tra lúc ${esc(dt(r.at))} · bấm để xem từng phân loại / chọn phân loại cần mua"
+    onclick="stockDetail(${s.id},${i})">${esc(t)} · ${esc(r.at.slice(11, 16))}</button>`;
+}
+// tóm tắt cả shop: còn hàng nếu 1 link còn, hết hàng nếu mọi link đã kiểm tra được đều hết (theo phân loại cần mua)
+function stockBadge(s) {
+  const vs = Object.values(s.stock_view || {});
+  if (!vs.length) return "";
+  return vs.some(v => v.in_stock) ? ` <span class="badge b-done">📦 còn hàng</span>` : ` <span class="badge b-cancel">⛔ hết hàng</span>`;
+}
+const SKU_STATUS = {1: ['<span class="pos">✅ đang bán</span>', "đang bán"], 2: ['<span class="neg">⛔ hết hàng</span>', "hết hàng"],
+                    0: ['<span class="muted">🚫 không bán</span>', "có số lượng nhưng không mua được (phân loại ngoài đợt sale / shop ẩn)"]};
+// 🎯 bật / tắt 1 phân loại trong danh sách cần mua của link (lưu server, bot /sale dùng chung)
+async function toggleVariant(id, i, k) {
+  const s = state.sales[id], u = s.links[i], name = s.stock[u].skus[k].name;
+  const cur = (s.variants || {})[u] || [];
+  const names = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name];
+  state.sales[id] = await post(`/sales/${id}/variants`, {link: u, names});
+  stockDetail(id, i);
+  if (state.tab === "sales") loadSales();
+}
+async function clearVariants(id, i) {
+  state.sales[id] = await post(`/sales/${id}/variants`, {link: state.sales[id].links[i], names: []});
+  stockDetail(id, i);
+  if (state.tab === "sales") loadSales();
+}
+function stockDetail(id, i) {
+  const s = state.sales[id], u = s.links[i], r = s.stock[u];
+  openModal(`${modalHead(`📦 ${esc(r.title || s.ten_sp)}`)}
+    <div class="meta"><span>🏪 ${esc(s.shop || "chưa ghi shop")}</span><span>🕒 ${esc(dtFull(r.at))}</span>${r.sold != null ? `<span>đã bán ${r.sold}</span>` : ""}</div>
+    <div class="links" style="margin:8px 0"><a href="${esc(u)}" target="_blank" rel="noopener">🔗 ${esc(u.replace(/^https?:\/\//, ""))}</a></div>
+    ${r.ok ? (() => {
+      const v = (s.stock_view || {})[u] || {mode: "total", names: [], total: r.total, in_stock: r.in_stock, missing: []};
+      const on = new Set(v.names);
+      const head = v.mode === "chosen" ? `🎯 Đang theo dõi phân loại bạn chọn <button class="btn sm" onclick="clearVariants(${id},${i})">Bỏ chọn</button>`
+        : v.mode === "auto" ? `🔮 Tự đoán theo tên sale “${esc(s.ten_sp)}${s.shop ? " · " + esc(s.shop) : ""}” – sai thì bấm 🎯 chọn đúng phân loại`
+        : r.skus.length > 1 ? "Chưa chọn phân loại: đang cộng mọi phân loại đang bán. Bấm 🎯 ở phân loại cần mua." : "";
+      return `${head ? `<div class="meta" style="margin:6px 0">${head}</div>` : ""}
+      <table><tr><th>Phân loại</th><th class="r">Còn lại</th><th>Trạng thái</th>${r.skus.length > 1 ? "<th></th>" : ""}</tr>
+      ${r.skus.map((k, j) => `<tr class="${on.has(k.name) ? "sku-on" : ""}"><td>${esc(k.name)}</td><td class="r"><b>${k.stock}</b></td>
+        <td title="${esc((SKU_STATUS[k.status] || [, ""])[1])}">${(SKU_STATUS[k.status] || [k.status == null ? "" : `<span class="muted">mã ${k.status}</span>`])[0]}</td>
+        ${r.skus.length > 1 ? `<td><button class="btn sm ${on.has(k.name) && v.mode === "chosen" ? "primary" : ""}" onclick="toggleVariant(${id},${i},${j})">🎯 ${on.has(k.name) && v.mode === "chosen" ? "Đang theo dõi" : "Theo dõi"}</button></td>` : ""}</tr>`).join("")}
+      <tr><td><b>${v.names.length ? "Còn (phân loại cần mua)" : "Tổng đang bán"}</b></td><td class="r"><b>${v.total}</b></td><td></td>${r.skus.length > 1 ? "<td></td>" : ""}</tr></table>
+      ${v.missing?.length ? `<div class="meta neg">⚠️ Lần kiểm tra này không thấy phân loại: ${esc(v.missing.join(", "))} (shop đổi tên / xóa?) – chọn lại.</div>` : ""}
+      <div class="meta" style="margin-top:8px">Chỉ cộng phân loại “✅ đang bán”. Trạng thái do TikTok trả về, ý nghĩa là đoán – mở app TikTok để chắc chắn.</div>`;
+    })()
+      : `<div class="empty">${esc(r.error || "Không đọc được")}</div>`}
+    <div class="foot"><button class="btn" onclick="stockModal()">📋 Mọi link</button><button class="btn" onclick="recheckLink(${id},${i})">🔁 Kiểm tra lại</button>
+      <button class="btn bad" onclick="removeLink(${id},${i})">🗑 Xóa link</button><button class="btn" onclick="closeModal()">Đóng</button></div>`);
+}
+const EXT_VERSION = "1.2";  // = static/extension/manifest.json, bản cũ thì nhắc cài lại
+function extGuide(old) {
+  openModal(`${modalHead(old ? "📦 Cập nhật tiện ích kiểm tra còn hàng" : "📦 Cài tiện ích kiểm tra còn hàng")}
+    <div class="meta" style="display:block;line-height:1.6">${old ? `Tiện ích đang dùng bản ${esc(old)}, bản mới ${EXT_VERSION} tra được hành trình GHN (🧩) ngoài kiểm tra còn hàng TikTok.
+      Tải bản mới, giải nén đè lên thư mục cũ rồi bấm ⟳ (Tải lại) ở tiện ích trong <b>chrome://extensions</b>.<br>` : ""}TikTok và GHN chặn máy chủ (captcha), nên việc đọc tồn kho TikTok và tra hành trình GHN chạy trong Chrome trên máy tính của bạn (điện thoại không cài được tiện ích).
+      <ol style="padding-left:20px;margin:8px 0">
+        <li><a href="/api/tiktok-extension.zip">⬇️ Tải tiện ích</a> rồi giải nén.
+          <span class="muted">Windows: chuột phải file <b>quan-li-don-tiktok.zip</b> → <b>Extract All… / Giải nén tất cả</b> → Extract
+          (đừng mở file zip rồi chọn thư mục bên trong – Chrome không đọc được file trong zip).
+          Ubuntu: chuột phải → <b>Extract Here / Giải nén tại đây</b>, hoặc dòng lệnh <code>unzip quan-li-don-tiktok.zip -d quan-li-don-tiktok</code>.</span></li>
+        <li>Mở <b>chrome://extensions</b>, bật <b>Chế độ dành cho nhà phát triển</b> (góc trên bên phải).</li>
+        <li>Bấm <b>Tải tiện ích đã giải nén</b>, chọn thư mục <b>quan-li-don-tiktok</b> vừa giải nén
+          – thư mục có file <b>manifest.json</b> ngay bên trong.</li>
+        <li>Tải lại trang này rồi bấm <b>📦 Kiểm tra còn hàng</b>.</li>
+      </ol>
+      ⚠️ Tiện ích chỉ chạy trên đúng địa chỉ đã tải nó về: <b>${esc(location.origin)}</b>. Mở web bằng địa chỉ khác
+      (vd localhost ↔ IP, http ↔ https) thì tải lại tiện ích từ địa chỉ đó.<br>
+      ⚠️ Báo lỗi <i>“Manifest file is missing”</i> = chọn sai thư mục (thư mục chứa 1 thư mục con khác) → chọn thư mục bên trong.
+      Nút bật chế độ nhà phát triển bị khóa (“do quản trị viên quản lý”) = máy công ty chặn cài tiện ích ngoài, cần nhờ IT hoặc dùng máy / Chrome cá nhân.<br>
+      Nên đăng nhập TikTok trên Chrome đó. Tiện ích chỉ chạy khi bạn bấm nút, gặp captcha thì báo lại để bạn tự xác minh.</div>
+    <div class="foot"><button class="btn" onclick="closeModal()">Đóng</button></div>`);
+}
+// link TikTok của các món đang sale; onlyBad = chỉ link lần trước báo captcha / lỗi
+const stockItems = onlyBad => Object.values(state.sales || {}).filter(s => s.active)
+  .flatMap(s => s.links.filter(u => isTikTok(u) && (!onlyBad || (s.stock[u] && !s.stock[u].ok))).map(link => ({sale_id: s.id, link})));
+function extReady() {
+  const ver = document.documentElement.dataset.qldExt;
+  if (ver === EXT_VERSION) return true;
+  extGuide(ver); return false;
+}
+// items: không truyền = mọi link, "bad" = link lỗi, hoặc [{sale_id, link}]
+function checkStock(items) {
+  if (!extReady()) return;
+  if (state.check && !state.check.finished) { toast("Đang kiểm tra, chờ xong lượt này hoặc bấm ⏹ Dừng", true); return stockModal(); }
+  items = items === "bad" ? stockItems(true) : items || stockItems();
+  if (!items.length) return toast("Không có link TikTok nào cần kiểm tra", true);
+  state.check = {n: items.length, done: 0, ok: 0, out: 0, bad: 0, links: new Set(items.map(x => x.link)), checked: new Set()};
+  window.postMessage({qld: "check", items}, location.origin);
+  stockModal();
+}
+const recheckLink = (id, i) => checkStock([{sale_id: id, link: state.sales[id].links[i]}]);
+async function removeLink(id, i) {
+  const s = state.sales[id], u = s.links[i];
+  if (!confirm(`Xóa link này khỏi sale #${id} ${s.ten_sp}?\n${u}`)) return;
+  state.sales[id] = await patch(`/sales/${id}`, {link: s.links.filter((_, j) => j !== i).join("\n")});
+  toast("🗑 Đã xóa link");
+  const box = $("#check-box"); box ? box.innerHTML = stockBody() : closeModal();
+  refresh();
+}
+// bảng mọi link TikTok của món đang sale: lỗi lên đầu → chưa kiểm tra → hết hàng → còn hàng; đang chạy thì kèm tiến độ
+function stockModal() {
+  openModal(`${modalHead("📦 Còn hàng TikTok")}<div id="check-box">${stockBody()}</div>`);
+}
+function stockBody() {
+  const c = state.check, run = c && !c.finished;
+  const rank = x => !x.r ? 1 : !x.r.ok ? 0 : (x.s.stock_view?.[x.u] || x.r).in_stock ? 3 : 2;
+  const rows = Object.values(state.sales || {}).filter(s => s.active)
+    .flatMap(s => s.links.map((u, i) => ({s, u, i, r: s.stock[u]})).filter(x => isTikTok(x.u)))
+    .sort((a, b) => rank(a) - rank(b));
+  const bad = rows.filter(x => x.r && !x.r.ok).length;
+  const status = x => {
+    if (run && x.u === c.waiting) return `<span class="badge b-ordered">⏸ chờ giải captcha</span>`;
+    if (run && c.links.has(x.u) && !c.checked.has(x.u)) return `<span class="badge b-muted">⏳ chờ</span>`;
+    return x.r ? stockChip(x.s, x.i) : `<span class="badge b-muted">chưa kiểm tra</span>`;
+  };
+  const head = !c ? "" : `${run && c.waiting ? `<div class="badge b-ordered" style="white-space:normal;margin-bottom:8px">⏸ TikTok hỏi xác minh: giải captcha trong tab TikTok vừa mở (chờ tối đa 2 phút), xong sẽ tự kiểm tra tiếp</div>` : ""}
+    <div class="meta"><b>${run ? "Đang kiểm tra" : c.stopped ? "Đã dừng" : "Xong"} ${c.done}/${c.n} link</b>
+      <span class="pos">📦 còn ${c.ok}</span><span class="neg">⛔ hết ${c.out}</span>${c.bad ? `<span>⚠️ lỗi ${c.bad}</span>` : ""}</div>
+    ${!run && c.reason === "captcha" ? `<div class="meta">⚠️ Dừng vì captcha chưa được giải. Mở 1 link TikTok trong Chrome, xác minh xong bấm 🔁 Kiểm tra lại link lỗi.</div>` : ""}`;
+  return `${head}
+    <div class="check-list">${rows.map(x => `<div class="res-row">
+        <div class="res-main"><b>#${x.s.id} ${esc(x.s.ten_sp)}${x.s.shop ? ` <span class="muted">· ${esc(x.s.shop)}</span>` : ""}</b>
+          <a href="${esc(x.u)}" target="_blank" rel="noopener" title="${esc(x.u)}">🔗 ${esc(x.u.replace(/^https?:\/\//, ""))}</a></div>
+        ${status(x)}
+        <button class="btn sm" title="Kiểm tra lại link này" onclick="recheckLink(${x.s.id},${x.i})">🔁</button>
+        <button class="btn sm bad" title="Xóa link khỏi sale" onclick="removeLink(${x.s.id},${x.i})">🗑</button>
+      </div>`).join("") || '<div class="empty">Không có link TikTok nào trong các món đang sale</div>'}</div>
+    <div class="foot">${run
+      ? `<button class="btn" onclick="window.postMessage({qld:'stop'},location.origin)">⏹ Dừng</button><button class="btn" onclick="closeModal()">Ẩn (vẫn chạy)</button>`
+      : `${bad ? `<button class="btn" onclick="checkStock('bad')">🔁 Kiểm tra lại ${bad} link lỗi</button>` : ""}<button class="btn primary" onclick="checkStock()">📦 Kiểm tra tất cả</button><button class="btn" onclick="closeModal()">Đóng</button>`}</div>`;
+}
+window.addEventListener("message", async e => {
+  if (e.source !== window || !e.data || !state.check) return;
+  const m = e.data, c = state.check;
+  if (m.qld === "captcha") {
+    c.waiting = m.link;
+  } else if (m.qld === "progress") {
+    c.waiting = null; c.done = m.i; c.checked.add(m.link);
+    let upd = null;
+    try { upd = await post(`/sales/${m.sale_id}/stock`, {link: m.link, result: m.result}); state.sales[upd.id] = upd; } catch {}
+    // đếm còn / hết theo phân loại cần mua (server tính), không theo tổng cả link
+    m.result.ok ? ((upd?.stock_view?.[m.link] || m.result).in_stock ? c.ok++ : c.out++) : c.bad++;
+  } else if (m.qld === "done") {
+    c.finished = true; c.stopped = m.stopped; c.reason = m.reason;
+    toast(m.reason === "captcha" ? "⚠️ Dừng vì TikTok hỏi captcha" : `📦 Xong: còn hàng ${c.ok} · hết ${c.out}${c.bad ? ` · lỗi ${c.bad}` : ""}`, m.reason === "captcha");
+    if (["sales", "products"].includes(state.tab)) refresh();
+  } else if (m.qld === "error") {
+    toast(m.error, true); if (!c.done) state.check = null;
+  } else return;
+  const box = $("#check-box"); if (box) box.innerHTML = stockBody();
+});
+
+async function toggleSale(id, on) {
+  await patch(`/sales/${id}`, {active: on ? 1 : 0});
+  toast(on ? "✅ Bật sale" : "⛔ Tắt sale"); refresh();
+}
+async function setAllSales(on) {
+  if (!confirm(on ? "Bật sale tất cả món?" : "Tắt sale tất cả món?")) return;
+  const r = await post("/sales/all-active", {active: on});
+  toast(`Đã đổi ${r.changed} món`); loadSales();
+}
+function addLinkForm(id) {
+  const s = state.sales[id];
+  openModal(`${modalHead(`➕ Thêm link · ${esc(s.ten_sp)}`)}
+    <div class="meta">🏪 ${esc(s.shop || "chưa ghi shop")} · đang có ${s.links.length} link</div>
+    <div class="form"><label class="full">Dán 1 hoặc nhiều link<textarea class="input" name="text" placeholder="https://vt.tiktok.com/..."></textarea></label></div>
+    <div class="foot"><button class="btn" onclick="closeModal()">Hủy</button><button class="btn primary" onclick="addLinks(${id})">Thêm</button></div>`);
+}
+async function addLinks(id) {
+  await post(`/sales/${id}/links`, {text: formData().text});
+  toast("🔗 Đã thêm link"); closeModal(); refresh();
+}
+function saleForm(id, copyFrom) {
+  const m = state.meta;
+  // copyFrom = id món sale (thêm shop khác) hoặc tên sản phẩm (từ tab Sản phẩm)
+  const s = id ? state.sales[id] : copyFrom ? {ten_sp: typeof copyFrom === "string" ? copyFrom : state.sales[copyFrom].ten_sp} : {};
+  // giá gốc gõ cho 1 cái, lưu = 1 cái × SL (giá mua được / % giảm tính trên tổng)
+  const orig = {ten_sp: s.ten_sp, shop: s.shop, so_luong: s.so_luong ?? "",
+                gia_goc: s.gia_goc ? short(s.gia_goc / Math.max(1, s.so_luong || 1)) : "",
+                uu_tien: s.uu_tien || "", nhom: s.nhom || (id ? "" : state.saleGroup !== "0" ? state.saleGroup : ""), link: s.link || ""};
+  // hàng đầu = mức chính (gia_sale / cong / giam_pt), các hàng sau = mức giá khác (muc_gia)
+  const tiers = [{pct: s.pct ?? "", cap: s.giam_toi_da_label || "", gia: s.gia_label || "", cong: s.cong_label || "", src: s.giam_pt ? "pct" : "gia"},
+                 ...(s.tiers || []).map(t => ({pct: t.pct ?? "", cap: t.cap_label, gia: t.gia_label, cong: t.cong_label, src: t.giam_pt ? "pct" : "gia"}))];
+  const fields = [
+    ["ten_sp", "Tên sản phẩm *", "text", orig.ten_sp, {list: m.products, full: true}],
+    ["shop", "Shop", "text", orig.shop, {list: m.shops}],
+    ["so_luong", "Số lượng", "num", orig.so_luong],
+    ["uu_tien", "🔝 Thứ tự ưu tiên (1 lên đầu, 2, 3…; trống = xếp sau cùng)", "num", orig.uu_tien, {ph: "vd 1"}],
+    ["nhom", "🗂 Nhóm sale (bot: /sale 1; trống = chưa chia nhóm)", "num", orig.nhom, {ph: "vd 1"}],
+    ["gia_goc", "🏷 Giá gốc 1 cái", "money", orig.gia_goc, {ph: "vd 5tr2"}],
+  ];
+  const paste = id || copyFrom ? "" : `
+    <details style="margin-top:12px"><summary style="cursor:pointer;color:var(--accent)">📋 Hoặc dán cả danh sách như trên bot</summary>
+      <div class="form"><label class="full"><textarea class="input" id="paste" style="min-height:140px"
+        placeholder="- I5 14600KF dưới 4tr8 công 70 sl 1 shop dttech&#10;hoặc dưới 4tr5 công 100&#10;https://vt.tiktok.com/...&#10;- i5 14400F giảm 10% gốc 3tr2 công 50"></textarea></label></div>
+      <div class="foot"><button class="btn primary" onclick="pasteSales()">Thêm từ danh sách</button></div>
+    </details>`;
+  openModal(`${modalHead(id ? `✏️ Sửa sale #${id}` : "＋ Thêm món sale")}
+    <div class="form">${fields.map(field).join("")}
+      <label>🧮 Tổng giá gốc (1 cái × số lượng)<input class="input" id="goc-total" readonly tabindex="-1" placeholder="tự tính"></label>
+      <div class="full tiers"><div class="tiers-head">💰 Mức giá <span class="muted">· gõ % giảm (+ giảm tối đa nếu có) → tự ra giá mua được theo tổng giá gốc, hoặc gõ giá → tự ra %</span></div>
+        <div id="tier-rows">${tiers.map((t, i) => tierRow(t, i === 0)).join("")}</div>
+        <button type="button" class="btn sm" onclick="addTier()">➕ Thêm mức giá</button></div>
+      ${field(["link", "Link (mỗi dòng 1 link)", "textarea", orig.link, {full: true}])}</div>
+    <div class="foot"><button class="btn" onclick="closeModal()">Hủy</button>
+      <button class="btn primary" onclick="saveSale(${id || 0})">${id ? "Lưu" : "Thêm"}</button></div>${paste}`);
+  saveSale.orig = {...orig, giam_pt: s.giam_pt ?? "", giam_toi_da: s.giam_toi_da_label || "", gia_sale: s.gia_label || "",
+                   cong: s.cong_label || "", muc_gia: s.muc_gia || ""};
+  const recalc = () => {
+    clearTimeout(saleForm._t);
+    saleForm._t = setTimeout(async () => {
+      const total = await gocTotal();
+      $("#goc-total").value = total ? short(total) + (saleQty() > 1 ? ` (${saleQty()} cái)` : "") : "";
+      document.querySelectorAll("#tier-rows .tier-row").forEach(calcTier);
+    }, 300);
+  };
+  for (const name of ["gia_goc", "so_luong"]) document.querySelector(`#modal-root [name="${name}"]`).addEventListener("input", recalc);
+  recalc();
+}
+const saleQty = () => Math.max(1, parseInt(document.querySelector('#modal-root [name="so_luong"]')?.value) || 1);
+// tổng giá gốc (1 cái × SL) – số đủ dạng 8.600.000 để server đọc đúng
+const gocTotal = async () => (await moneyVal(document.querySelector('#modal-root [name="gia_goc"]')?.value)) * saleQty();
+// 1 hàng mức giá: % giảm ↔ giá mua được (ô nào gõ sau cùng là nguồn, data-src) + công
+function tierRow(t = {}, main = false) {
+  return `<div class="tier-row" data-src="${t.src || "gia"}">
+    <label>% giảm<input class="input tier-pct" value="${esc(t.pct ?? "")}" placeholder="vd 10" inputmode="decimal" autocomplete="off" oninput="tierInput(this,'pct')"></label>
+    <label>Giảm tối đa<input class="input tier-cap" value="${esc(t.cap || "")}" placeholder="vd 2tr5" autocomplete="off" oninput="tierInput(this,'pct')"></label>
+    <label>Giá mua được${main ? " *" : ""}<input class="input tier-gia" value="${esc(t.gia || "")}" placeholder="vd dưới 4tr3" autocomplete="off" oninput="tierInput(this,'gia')"></label>
+    <label>Công<input class="input tier-cong" value="${esc(t.cong || "")}" placeholder="vd 150-200k" autocomplete="off" oninput="moneyHint(this)"><span class="hint"></span></label>
+    ${main ? '<span class="tier-main" title="Mức chính">★</span>' : '<button type="button" class="btn sm bad" title="Xóa mức này" onclick="this.parentElement.remove()">✕</button>'}</div>`;
+}
+function addTier() {
+  $("#tier-rows").insertAdjacentHTML("beforeend", tierRow());
+  $("#tier-rows .tier-row:last-child .tier-pct").focus();
+}
+function tierInput(el, src) {
+  const row = el.closest(".tier-row");
+  row.dataset.src = src;
+  clearTimeout(row._t);
+  row._t = setTimeout(() => calcTier(row), 300);
+}
+// số tiền gõ tay → số (đọc như bot, qua /api/money): "dưới 4tr3" → 4300000, khoảng → số lớn
+const _moneyCache = {};
+async function moneyVal(text) {
+  text = (text || "").trim();
+  if (!text) return 0;
+  if (!(text in _moneyCache)) _moneyCache[text] = await api(`/money?v=${encodeURIComponent(text)}`).catch(() => ({}));
+  const {lo, hi} = _moneyCache[text];
+  return hi > 0 ? hi : lo || 0;
+}
+async function calcTier(row) {
+  const goc = await gocTotal(), cap = await moneyVal(row.querySelector(".tier-cap").value);
+  const pct = row.querySelector(".tier-pct"), gia = row.querySelector(".tier-gia");
+  if (!goc) return;
+  if (row.dataset.src === "pct") {  // như utils.price_after_discount: giảm p% nhưng không quá "giảm tối đa"
+    const p = parseFloat(pct.value.replace(",", ".").replace("%", ""));
+    if (p > 0 && p < 100) gia.value = short(Math.round((goc - Math.min(goc * p / 100, cap || Infinity)) / 1000) * 1000);
+  } else {
+    const v = await moneyVal(gia.value);
+    pct.value = v && v < goc ? Math.round((1 - v / goc) * 100) : "";
+  }
+}
+// mức giá khác → dòng muc_gia: "11tr2 công 100 giảm 20% tối đa 1tr" (% + tối đa chỉ khi gõ theo %)
+const tiersText = rows => rows.filter(t => t.gia).map(t => t.gia + (t.cong ? ` công ${t.cong}` : "")
+  + (t.src === "pct" && t.pct ? ` giảm ${t.pct.replace("%", "")}%` + (t.cap ? ` tối đa ${t.cap}` : "") : "")).join("\n");
+async function saveSale(id) {
+  const rows = [...document.querySelectorAll("#tier-rows .tier-row")].map(r => ({src: r.dataset.src,
+    pct: r.querySelector(".tier-pct").value.trim(), cap: r.querySelector(".tier-cap").value.trim(),
+    gia: r.querySelector(".tier-gia").value.trim(), cong: r.querySelector(".tier-cong").value.trim()}));
+  const [main, ...extra] = rows;
+  const form = formData();
+  const gocChanged = !id || form.gia_goc !== String(saveSale.orig.gia_goc) || form.so_luong !== String(saveSale.orig.so_luong);
+  const data = {...form, cong: main.cong, muc_gia: tiersText(extra), giam_toi_da: main.src === "pct" ? main.cap : ""};
+  if (form.gia_goc.trim()) {
+    const total = await gocTotal();
+    if (!total) return toast("Không đọc được giá gốc", true);
+    data.gia_goc = total.toLocaleString("vi-VN");
+  }
+  if (main.src === "pct" && main.pct) {
+    if (!data.gia_goc.trim()) return toast("Nhập giá gốc để tính theo % giảm", true);
+    data.giam_pt = main.pct;  // server tính giá mua được, đổi giá gốc sau này vẫn giữ đúng %
+  } else {
+    data.gia_sale = main.gia; data.giam_pt = "";
+  }
+  if (id) {
+    const body = Object.fromEntries(Object.entries(data).filter(([k, v]) => k === "gia_goc" ? gocChanged : String(saveSale.orig[k] ?? "") !== v));
+    if (Object.keys(body).length) await patch(`/sales/${id}`, body);
+    toast("✏️ Đã lưu");
+  } else {
+    const r = await post("/sales", data);
+    toast(`➕ Đã thêm #${r.ids.join(", #")}`); refreshMeta();
+  }
+  closeModal(); refresh();
+}
+async function pasteSales() {
+  // ô Nhóm sale trên form áp cho cả danh sách (dòng đầu "nhóm 1" của danh sách được ưu tiên)
+  const r = await post("/sales", {text: $("#paste").value, nhom: $("#modal-root [name=nhom]")?.value || ""});
+  toast(`➕ Đã thêm ${r.ids.length} món` + (r.errors.length ? ` · ${r.errors.length} dòng không đọc được` : ""), r.errors.length > 0);
+  closeModal(); refresh(); refreshMeta();
+}
+
+// ---------- sản phẩm ----------
+async function viewProducts() {
+  const {products: list, orphans} = await api("/products");
+  state.products = Object.fromEntries(list.map(p => [p.id, p]));
+  state.sales = Object.fromEntries([...list, ...orphans].flatMap(p => p.sales).map(s => [s.id, s]));
+  const card = p => `<div class="card product">
+      <div class="head" style="flex-wrap:wrap;gap:6px">
+        <b>${esc(p.ten)}</b>
+        <span class="meta">${p.id ? `<span>💵 thu ${p.gia_label ? esc(p.gia_label) : "–"}</span><span>🧾 ${p.so_don} đơn</span>` : ""}
+          <span>🔥 ${p.sales.filter(s => s.active).length}/${p.sales.length} shop sale</span></span></div>
+      ${productImages(p)}
+      ${[...p.sales].sort((a, b) => b.active - a.active || rankOf(a) - rankOf(b)).map(s => saleShopRow(s, p.gia_goi_y ? p : null)).join("")
+        || '<div class="shop meta">Chưa có shop sale</div>'}
+      <div class="actions" style="padding:10px 14px">
+        <button class="btn sm" onclick="pickProductImages(${jsq(p.ten)})">🖼 Thêm ảnh</button>
+        ${p.id ? `<button class="btn sm" onclick="productForm(${p.id})">✏️ Sửa sản phẩm</button>`
+               : `<button class="btn sm" onclick="productForm(0, ${jsq(p.ten)})">＋ Thêm vào danh mục</button>`}
+        <button class="btn sm" onclick="saleForm(0, ${jsq(p.ten)})">🏪 Thêm shop sale</button></div>
+    </div>`;
+  // đang sale (nhiều shop đang bật trước) → có shop nhưng đã tắt hết → chưa có shop sale; cùng nhóm theo tên
+  const nActive = p => p.sales.filter(s => s.active).length;
+  const rank = p => nActive(p) ? 0 : p.sales.length ? 1 : 2;
+  const prio = p => Math.min(Infinity, ...p.sales.filter(s => s.active).map(rankOf));  // thứ tự nhỏ nhất của shop đang sale
+  const sorted = [...list].sort((a, b) => rank(a) - rank(b) || prio(a) - prio(b) || nActive(b) - nActive(a) || a.ten.localeCompare(b.ten, "vi"));
+  const groups = [["🔥 Đang sale", 0], ["⛔ Hết sale", 1], ["Chưa có shop sale", 2]]
+    .map(([title, r]) => [title, sorted.filter(p => rank(p) === r)]).filter(([, ps]) => ps.length);
+  orphans.sort((a, b) => prio(a) - prio(b) || nActive(b) - nActive(a));
+  $("#view").innerHTML = `
+    ${groups.map(([title, ps]) => `<div class="section-title">${title} · ${ps.length}</div>
+      <div class="grid cards">${ps.map(card).join("")}</div>`).join("") || '<div class="empty">Chưa có sản phẩm</div>'}
+    ${orphans.length ? `<div class="section-title">Món sale chưa có trong danh mục sản phẩm</div>
+      <div class="grid cards">${orphans.map(o => card({ten: o.ten_sp, sales: o.sales, images: o.images})).join("")}</div>` : ""}
+    <button class="btn primary fab" onclick="productForm()">＋ Thêm sản phẩm</button>`;
+}
+// ảnh sản phẩm: lưu theo tên (dùng chung cho món sale cùng tên), bot /sale gửi kèm thành album (tối đa 10 ảnh)
+const MAX_PRODUCT_IMAGES = 10;
+function productImages(p) {
+  const ids = p.images || [];
+  if (!ids.length) return "";
+  return `<div class="pimgs">${ids.map(i => `<img src="/api/product-images/${i}" alt="" loading="lazy"
+      onclick="showProductImage(${i}, ${jsq(p.ten)})" title="Bấm để xem / xóa">`).join("")}
+    <span class="meta">${ids.length}/${MAX_PRODUCT_IMAGES} ảnh · /sale gửi kèm</span></div>`;
+}
+function showProductImage(id, name) {
+  openModal(`${modalHead("🖼 " + esc(name))}
+    <div style="text-align:center"><img src="/api/product-images/${id}" alt="" style="max-width:100%;max-height:70vh;border-radius:8px"></div>
+    <div class="foot"><button class="btn bad left" onclick="deleteProductImage(${id})">🗑 Xóa ảnh</button>
+      <button class="btn" onclick="closeModal()">Đóng</button></div>`);
+}
+async function deleteProductImage(id) {
+  if (!confirm("Xóa ảnh này?")) return;
+  await del(`/product-images/${id}`);
+  toast("🗑 Đã xóa ảnh"); closeModal(); viewProducts();
+}
+function pickProductImages(name) {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "image/*"; inp.multiple = true;
+  inp.onchange = async () => {
+    const files = [...inp.files];
+    if (!files.length) return;
+    let ok = 0;
+    for (const [i, f] of files.entries()) {
+      if (f.size > 10 * 1024 * 1024) { toast(`Ảnh ${f.name} lớn quá 10MB`, true); continue; }
+      toast(`⏳ Đang tải ảnh ${i + 1}/${files.length}…`);
+      const res = await fetch(`/api/product-images?name=${encodeURIComponent(name)}`,
+        {method: "POST", headers: {"Content-Type": f.type || "image/jpeg"}, body: f});
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d.detail || "Lỗi " + res.status, true); break; }
+      ok++;
+    }
+    if (ok) toast(`✅ Đã thêm ${ok} ảnh – bot /sale gửi kèm`);
+    viewProducts();
+  };
+  inp.click();
+}
+function productForm(id, name) {
+  const p = id ? state.products[id] : {ten: name};
+  const orig = {ten: p.ten, gia_goi_y: p.gia_label || ""};
+  openModal(`${modalHead(id ? `✏️ Sản phẩm #${id}` : "＋ Thêm sản phẩm")}
+    ${id ? '<div class="meta">Đổi tên sẽ đổi luôn tên trong các đơn / món sale cũ</div>' : ""}
+    <div class="form">${field(["ten", "Tên sản phẩm", "text", orig.ten, {full: true}])}
+      ${field(["gia_goi_y", "Giá thu gợi ý 1 cái (có thể là khoảng)", "money", orig.gia_goi_y, {full: true, ph: "vd 4tr2 - 4tr4"}])}</div>
+    <div class="foot">${id ? `<button class="btn bad left" onclick="removeRec('products',${id})">🗑 Xóa</button>` : ""}
+      <button class="btn" onclick="closeModal()">Hủy</button>
+      <button class="btn primary" onclick="saveProduct(${id || 0})">${id ? "Lưu" : "Thêm"}</button></div>`);
+  saveProduct.orig = orig;
+}
+async function saveProduct(id) {
+  if (id) { const b = changed(saveProduct.orig); if (Object.keys(b).length) await patch(`/products/${id}`, b); }
+  else await post("/products", formData());
+  toast("✏️ Đã lưu"); closeModal(); viewProducts(); refreshMeta();
+}
+
+// tên sàn kèm icon (Shopee/TikTok), sàn khác chỉ hiện chữ
+const SAN_ICONS = {shopee: "shopee", tiktok: "tiktok"};
+function sanTag(src, fallback = "🛒") {
+  const key = Object.keys(SAN_ICONS).find(k => (src || "").toLowerCase().replace(/\s+/g, "").includes(k));
+  return `<span class="san-tag">${key ? `<img src="/icons/${SAN_ICONS[key]}.svg" alt="">` : fallback}${esc(src || "Khác")}</span>`;
+}
+
+// đơn vị vận chuyển: logo (static/icons) nếu có, không thì 🚚 + tên
+const VC_ICONS = [["spx", "spx"], ["shopeeexpress", "spx"], ["j&t", "jt"], ["jt", "jt"], ["viettel", "viettelpost"]];
+function vcTag(name) {
+  const k = (name || "").toLowerCase().replace(/\s+/g, "");
+  const icon = k && VC_ICONS.find(([m]) => k.includes(m));
+  return icon ? `<span class="vc-logo" title="${esc(name)}"><img src="/icons/${icon[1]}.svg" alt="${esc(name)}"></span>`
+              : `🚚 ${esc(name || "")}`;
+}
+
+// ---------- người đặt ----------
+// 1 sàn: tên · thanh tỉ lệ (xanh thành công / vàng đang đặt / đỏ hủy) · tổng, dưới là nhãn từng loại (bỏ loại 0 đơn)
+const OUTCOMES = [["ok", "✅", "thành công"], ["wait", "⏳", "đang đặt"], ["fail", "❌", "hủy"]];
+function sanRow(src, c) {
+  const total = c.ok + c.wait + c.fail;
+  return `<div class="san-item">
+    <div class="san-head"><b>${sanTag(src, "")}</b><span class="san-bar">${OUTCOMES.map(([k]) => c[k]
+        ? `<i class="${k}" style="flex:${c[k]}"></i>` : "").join("")}</span><b>${total} đơn</b></div>
+    <div class="san-chips">${OUTCOMES.filter(([k]) => c[k]).map(([k, icon, label]) =>
+        `<span class="chip ${k}">${icon} ${c[k]} ${label}</span>`).join("")}</div>
+  </div>`;
+}
+// tìm không dấu: "hung" khớp "Hùng", "đ" = "d"
+const foldText = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d");
+function personMatches(p, q) {
+  if (!q) return true;
+  const hay = foldText([p.ten, p.sdt, p.zalo, p.facebook, p.ghi_chu, p.tim, "#" + p.id].join(" | "));
+  const digits = q.replace(/[\s.\-]/g, "");
+  // mọi từ đều phải khớp; số điện thoại gõ có dấu cách / chấm vẫn tìm được
+  return foldText(q).split(/\s+/).every(w => hay.includes(w)) || (/^\+?\d{3,}$/.test(digits) && hay.includes(digits.replace(/^\+84/, "0")));
+}
+async function viewPeople() {
+  const all = await api("/people");
+  state.people = Object.fromEntries(all.map(p => [p.id, p]));
+  state.peopleAll = all;
+  $("#view").innerHTML = `<div class="toolbar">
+      <input class="input grow" id="peopleQ" placeholder="🔍 Tìm tên, SĐT, tên trên đơn, địa chỉ, Zalo, ghi chú…" value="${esc(state.peopleQ || "")}"
+        oninput="clearTimeout(this._t);this._t=setTimeout(()=>{state.peopleQ=this.value;renderPeople()},200)">
+      <div class="seg" id="peopleSeg"></div></div>
+    <div class="grid cards" id="peopleGrid"></div>
+    <button class="btn primary fab" onclick="personForm()">＋ Thêm người đặt</button>`;
+  renderPeople();
+}
+function renderPeople() {
+  const q = (state.peopleQ || "").trim();
+  const found = (state.peopleAll || []).filter(p => personMatches(p, q));
+  const filt = state.peopleFilter || "all";
+  const list = found.filter(p => filt === "all" || (filt === "hn" ? p.ha_noi === 1 : filt === "khac" ? p.ha_noi === 0 : p.ha_noi == null));
+  const segs = [["all", "Tất cả", found.length], ["hn", "📍 Hà Nội", found.filter(p => p.ha_noi === 1).length],
+                ["khac", "Nơi khác", found.filter(p => p.ha_noi === 0).length], ["unk", "Chưa rõ", found.filter(p => p.ha_noi == null).length]];
+  $("#peopleSeg").innerHTML = segs.map(([k, l, n]) => `<button class="${filt === k ? "on" : ""}"
+      onclick="state.peopleFilter='${k}';renderPeople()">${l} · ${n}</button>`).join("");
+  $("#peopleGrid").innerHTML = list.map(p => `
+    <div class="card" style="display:flex;flex-direction:column;gap:8px">
+      <div class="top" style="display:flex;justify-content:space-between;align-items:center">
+        <b style="font-size:16px">👤 ${esc(p.ten)} ${p.ha_noi === 1 ? '<span class="badge b-paid">📍 Hà Nội</span>' : p.ha_noi === 0 ? '<span class="badge b-muted">Nơi khác</span>' : ""}</b>
+        <span class="meta">#${p.id}</span></div>
+      <div class="meta">${p.sdt ? `<span>📞 ${esc(p.sdt)}</span>` : ""}${p.ghi_chu ? `<span>📝 ${esc(p.ghi_chu)}</span>` : ""}</div>
+      ${p.zalo || p.facebook ? `<div class="social">${p.zalo ? `<a class="btn sm zalo" href="${esc(p.zalo)}" target="_blank" rel="noopener">💬 Zalo</a>` : ""}${p.facebook
+        ? `<a class="btn sm fb" href="${esc(p.facebook)}" target="_blank" rel="noopener">📘 Facebook</a>` : ""}</div>` : ""}
+      <div class="money-row" style="grid-template-columns:repeat(3,1fr)">
+        <div>✅ Thành công<b class="${p.ok ? "pos" : ""}">${p.ok}</b></div>
+        <div>⏳ Đang đặt<b>${p.wait}</b></div>
+        <div>❌ Hủy<b class="${p.fail ? "neg" : ""}">${p.fail}</b></div></div>
+      ${Object.keys(p.theo_san).length ? `<div class="san">${Object.entries(p.theo_san)
+          .sort(([, a], [, b]) => (b.ok + b.wait + b.fail) - (a.ok + a.wait + a.fail)).map(([src, c]) => sanRow(src, c)).join("")}</div>` : ""}
+      <div class="money-row" style="grid-template-columns:repeat(2,1fr)">
+        <div>💰 Công đã nhận<b class="${p.cong_da_nhan ? "pos" : ""}">${p.cong_da_nhan ? short(p.cong_da_nhan) : "–"}</b></div>
+        <div>🛠 Công chưa trả<b class="${p.cong_chua_tra ? "neg" : ""}">${p.cong_chua_tra ? short(p.cong_chua_tra) : "–"}</b></div></div>
+      <div class="actions">
+        <button class="btn sm" onclick="go('orders',{status:'all',q:${jsq(p.ten)}})">🧾 Xem đơn</button>
+        ${p.has_qr ? `<button class="btn sm" onclick="showQr('person',${p.id})">🔳 QR</button>` : `<button class="btn sm" onclick="pickQr('person',${p.id},'show')">📷 Thêm QR</button>`}
+        <button class="btn sm" onclick="personForm(${p.id})">✏️ Sửa</button>
+      </div>
+    </div>`).join("") || `<div class="empty">${q ? `Không tìm thấy "${esc(q)}"` : "Chưa có ai"}</div>`;
+}
+function personForm(id) {
+  const p = id ? state.people[id] : {ten: "", ha_noi: state.peopleFilter === "hn" ? 1 : state.peopleFilter === "khac" ? 0 : null};
+  const orig = {ten: p.ten, sdt: p.sdt || "", zalo: p.zalo || "", facebook: p.facebook || "",
+                ha_noi: p.ha_noi == null ? "" : String(p.ha_noi), ghi_chu: p.ghi_chu || ""};
+  openModal(`${modalHead(id ? `✏️ ${esc(p.ten)}` : "＋ Thêm người đặt")}
+    <div class="meta">${id ? "Đổi tên sẽ đổi luôn tên trong các đơn" : "Thêm xong có thể bấm 📷 Thêm QR trên thẻ của người này"}</div>
+    <div class="form">${field(["ten", "Tên", "text", orig.ten])}${field(["sdt", "SĐT", "text", orig.sdt])}
+      ${field(["zalo", "💬 Zalo (link hoặc SĐT Zalo)", "text", orig.zalo, {ph: "https://zalo.me/… hoặc 09…"}])}
+      ${field(["facebook", "📘 Facebook (link hoặc tên trang)", "text", orig.facebook, {ph: "https://facebook.com/…"}])}
+      <label>📍 Ở Hà Nội?<select class="input" name="ha_noi">${[["", "Chưa rõ"], ["1", "Ở Hà Nội"], ["0", "Không (nơi khác)"]]
+        .map(([v, l]) => `<option value="${v}" ${orig.ha_noi === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      ${field(["ghi_chu", "Ghi chú", "text", orig.ghi_chu, {full: true}])}</div>
+    ${id ? `<details class="merge-box" style="margin-top:14px"><summary style="cursor:pointer;color:var(--accent)">🔀 Gộp vào người khác</summary>
+      <div class="meta" style="margin-top:6px">Các đơn của ${esc(p.ten)} sẽ chuyển sang người được chọn, rồi xóa ${esc(p.ten)} khỏi danh sách.</div>
+      <div class="toolbar" style="margin-top:8px"><select class="input grow" id="merge-into">
+        ${Object.values(state.people).filter(o => o.id !== id).sort((a, b) => a.ten.localeCompare(b.ten, "vi"))
+          .map(o => `<option value="${o.id}">${esc(o.ten)} (${o.ok + o.wait + o.fail} đơn)</option>`).join("")}</select>
+        <button class="btn" onclick="mergePerson(${id})">Gộp</button></div>
+    </details>` : ""}
+    <div class="foot">${id ? `<button class="btn bad left" onclick="removeRec('nguoi_dat',${id})">🗑 Xóa</button>` : ""}
+      <button class="btn" onclick="closeModal()">Hủy</button>
+      <button class="btn primary" onclick="savePerson(${id || 0})">${id ? "Lưu" : "Thêm"}</button></div>`);
+  savePerson.orig = orig;
+}
+async function mergePerson(id) {
+  const into = +$("#merge-into").value, from = state.people[id].ten, to = state.people[into].ten;
+  if (!confirm(`Gộp “${from}” vào “${to}”? Mọi đơn của ${from} sẽ thành của ${to}.`)) return;
+  const r = await post(`/people/${id}/merge`, {into});
+  toast(`🔀 Đã gộp – chuyển ${r.moved} đơn sang ${to}`); closeModal(); viewPeople(); refreshMeta();
+}
+async function savePerson(id) {
+  if (id) { const b = changed(savePerson.orig); if (Object.keys(b).length) await patch(`/nguoi_dat/${id}`, b); }
+  else await post("/people", formData());
+  toast(id ? "✏️ Đã lưu" : "＋ Đã thêm người đặt"); closeModal(); viewPeople(); refreshMeta();
+}
+
+// ---------- SĐT ----------
+// ---------- thưởng săn sale ----------
+// mỗi chiến dịch: người đặt cứ moc_don đơn gán vào chiến dịch (Thanh toán / Hoàn thành) được thưởng
+// hiện ở trang Đơn hàng (trên bảng 👤 Theo người đặt), khung gập lại được; chiến dịch có khoảng ngày riêng, không theo bộ lọc đơn
+async function loadBonus() {
+  const box = $("#bonus");
+  if (!box) return;
+  const list = (await api("/campaigns")).sort((a, b) => b.active - a.active);  // đang bật lên trước
+  if (!$("#bonus")) return;  // đã rời trang Đơn hàng
+  state.campaigns = Object.fromEntries(list.map(c => [c.id, c]));
+  const today = ymd(new Date());
+  // lựa chọn chiến dịch cho đơn (như db.campaign_choices): chiến dịch đang bật → cập nhật ngay khi thêm / bật / tắt / xóa
+  if (state.meta) state.meta.campaigns = list.filter(c => c.active).sort((a, b) => a.tu.localeCompare(b.tu)).map(c => [c.id, c.ten]);
+  const on = list.filter(c => c.active);
+  const sumOn = on.reduce((a, c) => a + c.tong_thuong, 0);
+  // ngày chỉ để nhắc: chưa tới ngày bắt đầu / đã qua ngày kết thúc
+  const dateNote = c => c.tu > today ? '<span class="badge b-muted">chưa tới ngày</span>' : c.den && c.den < today ? '<span class="badge b-muted">đã qua ngày kết thúc</span>' : "";
+  box.innerHTML = `<details class="card by-person" ${state.byBonus ? "open" : ""} ontoggle="state.byBonus=this.open;save()">
+    <summary><b>🎁 Thưởng săn sale</b><span class="muted">${list.length ? `${list.length} chiến dịch${on.length ? ` · đang bật ${on.length} · thưởng ${short(sumOn)}` : " · không có chiến dịch nào đang bật"}` : "chưa có chiến dịch"}</span></summary>
+    <div class="bonus-body">
+      <div class="toolbar" style="margin:0"><button class="btn sm primary" onclick="campaignForm()">＋ Thêm chiến dịch</button>
+        <span class="muted">Mỗi người đặt cứ N đơn gán vào chiến dịch (💵 Thanh toán / ✅ Hoàn thành) được thưởng · chọn chiến dịch ở từng đơn hoặc ☑ chọn nhiều đơn → 🎁 Gán chiến dịch · bot: /thuongsale</span></div>
+      ${list.map(c => {
+        const rule = `Cứ <b>${c.moc_don} đơn</b> thưởng <b>${esc(c.thuong_label)}</b>`;
+        return `<div class="campaign ${c.active ? "" : "off"}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <label class="switch" title="${c.active ? "Đang bật – bấm để tắt" : "Đã tắt – bấm để bật"}"><input type="checkbox" ${c.active ? "checked" : ""}
+              onchange="toggleCampaign(${c.id},this.checked)"><span></span></label>
+            <b>🎁 ${esc(c.ten)}</b> ${c.active ? '<span class="badge b-done">✅ đang bật</span>' : '<span class="badge b-muted">⏸ đã tắt</span>'} ${dateNote(c)}</span>
+          <span class="actions"><button class="btn sm" onclick="go('orders',{status:'all',q:'',tu:'',den:'',cd:'${c.id}'})">🧾 Đơn</button>
+            <button class="btn sm" onclick="campaignForm(${c.id})">✏️ Sửa</button>
+            <button class="btn sm bad" onclick="removeRec('campaigns',${c.id})">🗑</button></span></div>
+        <div class="muted" style="margin:6px 0;font-size:13px">📅 ${dmy(c.tu)} → ${c.den ? dmy(c.den) : "nay"} · ${rule}</div>
+        <div class="muted" style="margin-bottom:8px;font-size:13px">Tổng thưởng <b style="font-size:18px;color:var(--text)">${money(c.tong_thuong)}</b> · ${c.tong_dat} đơn đạt${c.tong_dang_dat ? ` · ${c.tong_dang_dat} đơn ⏳ đang đặt` : ""}${c.tong_nhan ? ` · ${c.tong_nhan} đơn 📦 đã nhận, chưa trả công` : ""}${c.tong_cho ? " (chưa tính)" : ""}${c.tong_cong ? ` · Tổng công <b style="color:var(--text)">${money(c.tong_cong)}</b>${c.tong_cong_chua_tra ? ` (chưa trả ${money(c.tong_cong_chua_tra)})` : ""}` : ""}</div>
+        ${c.people.length ? `<div class="scroll"><table><tr><th>Người đặt</th><th class="r" title="Đơn đã gán, còn ⏳ Đã đặt (chưa nhận hàng) – chưa tính thưởng">Đang đặt</th><th class="r" title="Đơn đã gán, 📦 Đã nhận hàng nhưng chưa trả công – chưa tính thưởng, trả công là được tính">Đã nhận</th><th class="r" title="💵 Thanh toán / ✅ Hoàn thành">Đơn đạt</th><th class="r" title="Tổng công đặt mọi đơn đã gán vào chiến dịch (không tính đơn hủy); dòng nhỏ = phần chưa trả">Tổng công</th><th class="r">Quà</th><th class="r">Tới lần sau</th></tr>
+          ${c.people.map(p => `<tr class="click" onclick="go('orders',{status:'all',q:${jsq(p.ten)},tu:'',den:'',cd:'${c.id}'})" title="Xem đơn của ${esc(p.ten)} trong chiến dịch">
+            <td>${esc(p.ten)}</td>
+            <td class="r ${p.dang_dat ? "" : "muted"}">${p.dang_dat || "–"}</td><td class="r ${p.nhan ? "" : "muted"}">${p.nhan ? `<b style="color:var(--teal)">${p.nhan}</b>` : "–"}</td><td class="r">${p.dat}</td><td class="r">${p.cong ? `<b>${short(p.cong)}</b>${p.cong_chua_tra ? `<div class="muted" style="font-size:12px">chưa trả ${short(p.cong_chua_tra)}</div>` : ""}` : '<span class="muted">–</span>'}</td><td class="r"><b class="${p.thuong ? "pos" : ""}">${p.thuong ? short(p.thuong) + (p.lan > 1 ? ` <span class="muted">(${p.lan} lần)</span>` : "") : "–"}</b></td>
+            <td class="r muted">còn ${p.con} đơn</td></tr>`).join("")}</table></div>` : '<div class="empty">Chưa có đơn nào gán vào chiến dịch này</div>'}
+      </div>`;
+      }).join("")}
+    </div></details>`;
+}
+async function toggleCampaign(id, on) {
+  await post(`/campaigns/${id}/active`, {active: on ? 1 : 0});
+  toast(on ? "✅ Bật chiến dịch" : "⏸ Tắt chiến dịch – không hiện để chọn cho đơn nữa"); loadBonus(); renderPickbar();
+}
+function campaignForm(id) {
+  const c = id ? state.campaigns[id] : {active: 1};
+  const orig = {ten: c.ten || "", tu: c.tu ? dmy(c.tu) : dmy(ymd(new Date())), den: c.den ? dmy(c.den) : "",
+                moc_don: c.moc_don || 5, thuong: c.thuong ? short(c.thuong) : ""};
+  openModal(`${modalHead(id ? `✏️ Sửa chiến dịch` : "＋ Thêm chiến dịch thưởng")}
+    <div class="meta">Tính cho từng người đặt: đơn gán vào chiến dịch, ở trạng thái 💵 Thanh toán / ✅ Hoàn thành</div>
+    <div class="form">${[
+      ["ten", "Tên chiến dịch *", "text", orig.ten, {full: true, ph: "vd Sale 11/11"}],
+      ["tu", "Từ ngày *", "text", orig.tu, {ph: "dd/mm/yyyy hoặc 03112026"}],
+      ["den", "Đến ngày (trống = đến nay)", "text", orig.den, {ph: "dd/mm/yyyy hoặc 15112026"}],
+      ["moc_don", "Cứ bao nhiêu đơn *", "num", orig.moc_don, {ph: "vd 5"}],
+      ["thuong", "Thì thưởng *", "money", orig.thuong, {ph: "vd 100k"}],
+      ["active", "Trạng thái", "select", c.active ? "1" : "0", {options: [["1", "✅ Đang bật (chọn được cho đơn)"], ["0", "⏸ Tắt"]], full: true}],
+    ].map(field).join("")}</div>
+    <div class="foot"><button class="btn" onclick="closeModal()">Hủy</button>
+      <button class="btn primary" onclick="saveCampaign(${id || 0})">${id ? "Lưu" : "Thêm"}</button></div>`);
+}
+async function saveCampaign(id) {
+  const d = formData();
+  const tu = parseDmy(d.tu), den = parseDmy(d.den);
+  if (!tu) return toast("Ngày bắt đầu không đúng, gõ dd/mm/yyyy hoặc 03112026", true);
+  if (den === null) return toast("Ngày kết thúc không đúng, gõ dd/mm/yyyy hoặc 15112026", true);
+  const body = {...d, tu, den};
+  if (id) await patch(`/campaigns/${id}`, body); else await post("/campaigns", body);
+  toast(id ? "✏️ Đã lưu" : "🎁 Đã thêm chiến dịch"); closeModal(); await refreshMeta(); loadBonus();
+}
+
+async function viewPhones() {
+  const list = await api("/phones");
+  state.phones = Object.fromEntries(list.map(p => [p.id, p]));
+  const filt = state.phoneFilter || "all";
+  const shown = list.filter(p => filt === "all" || (filt === "mine" ? p.cua_toi : filt === "free" ? !p.da_su_dung : p.da_su_dung))
+                    .sort((a, b) => b.cua_toi - a.cua_toi);
+  const segs = [["all", "Tất cả"], ["mine", "📱 Của tôi"], ["free", "🟢 Free"], ["busy", "🔴 Đang dùng"]];
+  $("#view").innerHTML = `
+    <div class="toolbar"><div class="seg">${segs.map(([k, l]) => `<button class="${filt === k ? "on" : ""}"
+      onclick="state.phoneFilter='${k}';viewPhones()">${l}</button>`).join("")}</div>
+      <span class="meta">${shown.length} số</span></div>
+    <div class="grid cards">${shown.map(p => `
+      <div class="card" style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <b style="font-size:16px">${p.cua_toi ? "📱" : "👤"} ${esc(p.sdt)}</b>
+          <span class="badge ${p.da_su_dung ? "b-cancel" : "b-done"}">${p.da_su_dung ? "🔴 Đang dùng" : "🟢 Free"}</span></div>
+        <div class="meta">${p.may ? `<span>📲 ${esc(p.may)}</span>` : ""}${p.ghi_chu ? `<span>📝 ${esc(p.ghi_chu)}</span>` : ""}
+          <span>${p.so_don} đơn</span>${p.so_dia_chi > 1 ? `<span>${p.so_dia_chi} địa chỉ</span>` : ""}</div>
+        ${Object.keys(p.theo_san).length ? `<div class="phone-san">${Object.entries(p.theo_san).map(([src, c]) =>
+          `<div><b>${sanTag(src, "🛒")}</b>${OUTCOMES.filter(([k]) => c[k]).map(([k, icon, label]) =>
+            `<span class="chip ${k}" title="${label}">${icon} ${c[k]}</span>`).join("")}</div>`).join("")}</div>` : ""}
+        <div class="actions">
+          <button class="btn sm" onclick="go('orders',{status:'all',q:${jsq(p.sdt)}})">🧾 Đơn</button>
+          <button class="btn sm" onclick="phoneForm(${p.id})">✏️ Sửa</button>
+        </div>
+      </div>`).join("") || '<div class="empty">Không có số nào</div>'}</div>
+    <button class="btn primary fab" onclick="phoneForm()">＋ Thêm số</button>`;
+}
+function phoneForm(id) {
+  const p = id ? state.phones[id] : {cua_toi: 1};
+  const yes = ["Của tôi", "Người khác"], used = ["Free", "Đang dùng"];
+  const orig = {sdt: p.sdt || "", may: p.may || "", ghi_chu: p.ghi_chu || "",
+                cua_toi: p.cua_toi ? yes[0] : yes[1], da_su_dung: used[p.da_su_dung ? 1 : 0]};
+  openModal(`${modalHead(id ? `✏️ ${esc(p.sdt)}` : "＋ Thêm số")}
+    <div class="form">${id ? "" : field(["sdt", "Số điện thoại", "text", "", {full: true}])}
+      ${field(["cua_toi", "Chủ số", "select", orig.cua_toi, {options: yes}])}
+      ${field(["may", "Lắp ở máy", "text", orig.may])}
+      ${id ? field(["da_su_dung", "Trạng thái", "select", orig.da_su_dung, {options: used}]) : ""}
+      ${field(["ghi_chu", "Ghi chú", "text", orig.ghi_chu, {full: !id}])}</div>
+    <div class="foot">${id ? `<button class="btn bad left" onclick="removeRec('phones',${id})">🗑 Xóa</button>` : ""}
+      <button class="btn" onclick="closeModal()">Hủy</button><button class="btn primary" onclick="savePhone(${id || 0})">Lưu</button></div>`);
+  savePhone.orig = orig;
+}
+async function savePhone(id) {
+  const b = id ? changed(savePhone.orig) : formData();
+  if ("cua_toi" in b) b.cua_toi = b.cua_toi === "Của tôi" ? 1 : 0;
+  if ("da_su_dung" in b) b.da_su_dung = b.da_su_dung === "Đang dùng" ? 1 : 0;
+  if (id) { if (Object.keys(b).length) await patch(`/phones/${id}`, b); }
+  else await post("/phones", b);
+  toast("✏️ Đã lưu"); closeModal(); viewPhones();
+}
+
+// ---------- 🏍 giao hàng: bưu cục / kho giao cuối + nhân viên giao (tổng hợp từ hành trình đã lưu) ----------
+const LM_STATE = {delivered: ["✅ Đã giao", "b-done"], giao: ["🏍 Đang giao", "b-accent"], post: ["📮 Ở bưu cục", "b-ordered"],
+                  returned: ["↩️ Hoàn / hủy", "b-cancel"]};
+const hrs = h => h == null ? "" : h < 24 ? `${h} giờ` : `${Math.round(h / 24 * 10) / 10} ngày`;
+async function viewLastMile() {
+  $("#view").innerHTML = `<div class="toolbar">
+      <input class="input grow" placeholder="🔍 Tìm bưu cục, nhân viên, SĐT, địa chỉ, mã vận đơn, #đơn…" value="${esc(state.lmQ || "")}"
+        oninput="clearTimeout(this._t);this._t=setTimeout(()=>{state.lmQ=this.value;renderLastMile()},250)">
+      <span id="lm-seg" class="seg"></span></div>
+    <div class="meta" style="margin:6px 0 0">Tự tổng hợp từ hành trình đã lưu (mỗi lần bot / web tra hành trình là cập nhật).
+      Chỉ J&amp;T ghi tên + SĐT nhân viên giao; SPX, GHN chỉ có tên kho / bưu cục giao cuối.</div>
+    <div id="lastmile"><div class="empty">⏳ Đang tải…</div></div>`;
+  state.lastMile = await api("/last-mile");
+  renderLastMile();
+}
+function renderLastMile() {
+  const data = state.lastMile || [];
+  const q = (state.lmQ || "").trim().toLowerCase().replace(/^#/, "");
+  const hit = (...xs) => !q || xs.some(x => String(x ?? "").toLowerCase().includes(q));
+  $("#lm-seg").innerHTML = [["", "Tất cả", data.reduce((a, c) => a + c.don, 0)], ...data.map(c => [c.carrier, c.carrier, c.don])]
+    .map(([k, l, n]) => `<button class="${(state.lmVc || "") === k ? "on" : ""}" onclick="state.lmVc=${jsq(k)};renderLastMile()">${esc(l)}<span class="n">${n}</span></button>`).join("");
+  const itemHit = it => hit(it.ma_don, it.courier, it.latest, ...it.orders.flatMap(o => [o.id, o.ten_nguoi_dat, o.ten_tren_don, o.dia_chi, o.ten_sp]));
+  const html = data.filter(c => !state.lmVc || c.carrier === state.lmVc).map(c => {
+    const posts = c.posts.map(p => {
+      const postHit = hit(p.post) || p.couriers.some(k => hit(k.name, ...k.phones));
+      const items = postHit ? p.items : p.items.filter(itemHit);
+      return items.length ? {...p, shown: items} : null;
+    }).filter(Boolean);
+    if (!posts.length) return "";
+    return `<div class="section-title">${vcTag(c.carrier)} ${esc(c.carrier)} <small>${posts.length} nơi giao · ${c.don} đơn${c.has_names ? "" : " · hãng không ghi tên nhân viên giao"}</small></div>
+      <div class="grid cards lm-grid">${posts.map(p => lastMilePost(p)).join("")}</div>`;
+  }).join("");
+  $("#lastmile").innerHTML = html || `<div class="empty">${q ? "Không có gì khớp" : "Chưa có đơn nào tới bưu cục giao cuối trong hành trình đã lưu"}</div>`;
+}
+function lastMilePost(p) {
+  const couriers = p.couriers.length ? `<div class="lm-couriers"><table><tr><th>Nhân viên giao</th><th>SĐT</th><th class="r">Đã giao</th><th>Hay giao tới</th></tr>
+      ${p.couriers.map(k => `<tr><td><b>${esc(k.name)}</b><div class="muted">${k.first === k.last ? dmy(k.first) : `${dmy(k.first)} → ${dmy(k.last)}`}</div></td>
+        <td>${k.phones.map(ph => `<a href="tel:${esc(ph)}">${esc(ph)}</a> <button class="btn xs" title="Chép SĐT" onclick="copyText(${jsq(ph)})">📋</button>`).join("<br>") || "–"}</td>
+        <td class="r"><b>${k.delivered}</b>${k.don > k.delivered ? `<span class="muted">/${k.don}</span>` : ""}</td>
+        <td class="muted">${k.dia_chi.slice(0, 3).map(d => `${esc(d.dc)} <b>×${d.n}</b>`).join("<br>")}</td></tr>`).join("")}</table></div>`
+    : "";
+  const items = p.shown.map(it => {
+    const [label, cls] = LM_STATE[it.state] || [it.state, "b-muted"];
+    return it.orders.map(o => `<tr class="click" onclick="orderDetail(${o.id})" title="Xem đơn #${o.id}">
+        <td>#${o.id}<div class="muted">${esc(it.ma_don)}</div></td>
+        <td><span class="badge ${cls}">${label}</span>${it.courier ? `<div class="muted">🧑‍✈️ ${esc(it.courier)}</div>` : ""}</td>
+        <td>${esc(o.ten_nguoi_dat || "")}${o.ten_tren_don ? ` <span class="muted">· 🪪 ${esc(o.ten_tren_don)}</span>` : ""}
+          <div class="muted">${esc(o.dia_chi || "")}</div></td>
+        <td class="muted">tới ${dt(it.arrived)}${it.done ? `<br>giao ${dt(it.done)} · ${hrs(it.hours)}` : ""}
+          ${it.tries > 1 ? `<br>🔁 ${it.tries} lần giao` : ""}${it.fails ? `<br>⚠️ ${it.fails} lần lỗi` : ""}</td></tr>`).join("")
+      || `<tr><td colspan="4"><span class="badge ${cls}">${label}</span> ${esc(it.ma_don)} <span class="muted">(không khớp đơn nào)</span></td></tr>`;
+  }).join("");
+  return `<div class="card lm-post">
+    <div class="head" style="flex-wrap:wrap;gap:6px"><b>📮 ${esc(p.post)}</b>
+      <span class="meta"><span>🧾 ${p.don} đơn</span><span>✅ ${p.delivered} đã giao</span>
+        ${p.dang_giao ? `<span>🏍 ${p.dang_giao} đang giao</span>` : ""}${p.returned ? `<span>↩️ ${p.returned} hoàn/hủy</span>` : ""}
+        ${p.avg_hours != null ? `<span title="Trung bình từ lúc tới bưu cục / kho giao cuối đến lúc giao xong">⏱ TB ${hrs(p.avg_hours)}</span>` : ""}
+        <span>🕒 gần nhất ${dt(p.last)}</span></span></div>
+    ${couriers}
+    <details class="lm-orders"${state.lmQ ? " open" : ""}><summary>🧾 ${p.shown.length} đơn${p.shown.length < p.don ? ` / ${p.don}` : ""}</summary>
+      <div class="scroll"><table>${items}</table></div></details>
+  </div>`;
+}
+
+// ---------- sổ địa chỉ đặt hàng (bot /diachi) ----------
+function viewAddresses() {
+  $("#view").innerHTML = `
+    <div class="toolbar">
+      <input class="input grow" placeholder="🔍 Tìm địa chỉ…" value="${esc(state.addrQ || "")}"
+        oninput="clearTimeout(this._t);this._t=setTimeout(()=>{state.addrQ=this.value;loadAddresses()},300)">
+      <span class="meta" id="addr-count"></span></div>
+    <div id="addresses" class="grid cards"></div>
+    <button class="btn primary fab" onclick="addressForm()">＋ Thêm địa chỉ</button>`;
+  loadAddresses();
+}
+async function loadAddresses() {
+  if (!$("#addresses")) return viewAddresses();
+  const list = await api("/addresses?q=" + encodeURIComponent(state.addrQ || ""));
+  state.addresses = Object.fromEntries(list.map(a => [a.id, a]));
+  $("#addr-count").textContent = `${list.length} địa chỉ`;
+  $("#addresses").innerHTML = list.map(a => `
+    <div class="card addr-card">
+      <div class="addr-text">${esc(a.noi_dung)}</div>
+      <div class="actions"><span class="muted">#${a.id} · ${dt(a.created_at)}</span>
+        <button class="btn sm" onclick="copyText(state.addresses[${a.id}].noi_dung)">📋 Chép</button>
+        <button class="btn sm" onclick="addressForm(${a.id})">✏️ Sửa</button></div>
+    </div>`).join("") || `<div class="empty">${state.addrQ ? "Không có địa chỉ nào khớp" : "Chưa lưu địa chỉ nào – bấm ＋ Thêm địa chỉ"}</div>`;
+}
+function addressForm(id) {
+  const a = id ? state.addresses[id] : {};
+  openModal(`${modalHead(id ? `✏️ Địa chỉ #${id}` : "＋ Thêm địa chỉ")}
+    <div class="form addr-form">${field(["noi_dung", "Địa chỉ", "textarea", a.noi_dung || "", {full: true, ph: "Tên người nhận, SĐT, địa chỉ… (xuống dòng thoải mái)"}])}</div>
+    <div class="foot">${id ? `<button class="btn bad left" onclick="removeRec('addresses',${id})">🗑 Xóa</button>` : ""}
+      <button class="btn" onclick="closeModal()">Hủy</button><button class="btn primary" onclick="saveAddress(${id || 0})">Lưu</button></div>`);
+}
+async function saveAddress(id) {
+  const b = formData();
+  if (!b.noi_dung.trim()) { toast("Địa chỉ trống", true); return; }
+  if (id) await patch(`/addresses/${id}`, b); else await post("/addresses", b);
+  toast("✏️ Đã lưu"); closeModal(); loadAddresses();
+}
+// chép chữ: clipboard API cần https / localhost → web chạy http trong mạng LAN thì dùng cách cũ (execCommand)
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const t = document.createElement("textarea");
+    t.value = text; t.style.position = "fixed"; t.style.opacity = "0";
+    document.body.appendChild(t); t.select();
+    const ok = document.execCommand("copy"); t.remove();
+    if (!ok) { toast("Không chép được – hãy bôi đen để chép", true); return; }
+  }
+  toast("📋 Đã chép");
+}
+
+// ---------- tài khoản web (admin) ----------
+async function viewUsers() {
+  const list = await api("/users");
+  state.users = Object.fromEntries(list.map(u => [u.id, u]));
+  $("#view").innerHTML = `
+    <div class="toolbar"><span class="meta">${list.length} tài khoản · admin được quản lí tài khoản, user dùng mọi chức năng còn lại</span></div>
+    <div class="card"><table style="min-width:520px">
+      <tr><th>Tên đăng nhập</th><th>Vai trò</th><th>Trạng thái</th><th>Đăng nhập gần nhất</th><th>Tạo lúc</th></tr>
+      ${list.map(u => `<tr class="click" onclick="userForm(${u.id})">
+        <td><b>${esc(u.username)}</b>${u.id === state.me.id ? ' <span class="badge b-muted">bạn</span>' : ""}</td>
+        <td><span class="badge ${u.role === "admin" ? "b-accent" : "b-muted"}">${u.role}</span></td>
+        <td>${u.active ? '<span class="badge b-done">● hoạt động</span>' : '<span class="badge b-cancel">🔒 khóa</span>'}</td>
+        <td class="muted">${u.last_login ? dtFull(u.last_login) : "chưa"}</td>
+        <td class="muted">${dtFull(u.created_at)}</td></tr>`).join("")}
+    </table></div>
+    <button class="btn primary fab" onclick="userForm()">＋ Thêm tài khoản</button>`;
+}
+function userForm(id) {
+  const u = id ? state.users[id] : null, self = id === state.me.id;
+  const roles = ["user", "admin"];
+  openModal(`${modalHead(u ? `🔐 ${esc(u.username)}` : "＋ Thêm tài khoản")}
+    <div class="form">
+      ${u ? "" : field(["username", "Tên đăng nhập", "text", "", {ph: "3–32 ký tự: chữ, số, . _ - @"}])}
+      ${self ? "" : field(["role", "Vai trò", "select", u ? u.role : "user", {options: roles}])}
+      ${field(["password", u ? "Đặt lại mật khẩu (để trống = giữ nguyên)" : "Mật khẩu (≥ 6 ký tự)", "password", "", {full: !!u}])}
+    </div>
+    ${self ? '<div class="meta" style="margin-top:8px">Tài khoản của bạn: đổi mật khẩu ở nút 👤 góc trên.</div>' : ""}
+    <div class="foot">
+      ${u && !self ? `<button class="btn bad left" onclick="deleteUser(${id})">🗑 Xóa</button>
+        <button class="btn" onclick="toggleUser(${id}, ${!u.active})">${u.active ? "🔒 Khóa" : "🔓 Mở khóa"}</button>` : ""}
+      <button class="btn" onclick="closeModal()">Hủy</button>
+      ${self ? "" : `<button class="btn primary" onclick="saveUser(${id || 0})">${u ? "Lưu" : "Tạo"}</button>`}
+    </div>`);
+}
+async function saveUser(id) {
+  const f = formData();
+  if (id) {
+    const body = {};
+    if (f.role !== state.users[id].role) body.role = f.role;
+    if (f.password) body.password = f.password;
+    if (Object.keys(body).length) await patch(`/users/${id}`, body);
+  } else await post("/users", f);
+  toast(id ? "✏️ Đã lưu" : "➕ Đã tạo tài khoản"); closeModal(); viewUsers();
+}
+async function toggleUser(id, active) {
+  await patch(`/users/${id}`, {active});
+  toast(active ? "🔓 Đã mở khóa" : "🔒 Đã khóa – tài khoản bị đăng xuất"); closeModal(); viewUsers();
+}
+async function deleteUser(id) {
+  if (!confirm(`Xóa tài khoản “${state.users[id].username}”?`)) return;
+  await del(`/users/${id}`); toast("🗑 Đã xóa"); closeModal(); viewUsers();
+}
+
+start();
+</script>
+</body>
+</html>
