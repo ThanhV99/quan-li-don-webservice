@@ -6,7 +6,7 @@ FROM python:3.12.15-slim-trixie@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    DB_PATH=/app/data/orders.db \
+    FILES_DIR=/app/data \
     TZ=Asia/Ho_Chi_Minh
 
 WORKDIR /app
@@ -21,9 +21,11 @@ COPY *.py ./
 COPY certs ./certs
 COPY static ./static
 
-# Database nằm trong volume /app/data để không mất khi build lại image
+# Ảnh tải sẵn (QR, sản phẩm) nằm trong volume /app/data để không mất khi build lại image; database là Postgres
 VOLUME ["/app/data"]
 
 USER 1000:1000
 
-CMD ["uvicorn", "web:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+# Render (và nơi khác) cấp cổng qua biến PORT; chạy ở máy / docker compose: 8000.
+# Sau proxy của Render đặt FORWARDED_ALLOW_IPS=* để uvicorn tin X-Forwarded-For (IP thật cho giới hạn đăng nhập sai).
+CMD ["sh", "-c", "exec uvicorn web:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers"]

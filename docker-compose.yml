@@ -2,6 +2,8 @@
 # Chạy:  cd web && docker compose up -d --build
 # Lần đầu trên máy chủ: docker network create quan-li-don   (mạng chung với stack bot)
 # Tài khoản web: docker compose exec web python manage.py createadmin <tên>
+# Database: Postgres (service postgres bên dưới, chạy cùng) – đặt PG_PASSWORD + DATABASE_URL trong .env.
+# Sao lưu: docker compose exec -T postgres pg_dump -U quanlidon -Fc quanlidon > backup-$(date +%F).dump
 name: quan-li-don-web
 
 services:
@@ -12,14 +14,17 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DB_PATH: /app/data/orders.db
+      FILES_DIR: /app/data  # ảnh QR / sản phẩm tải sẵn
       TZ: Asia/Ho_Chi_Minh  # giờ VN cho ngày tạo đơn / thống kê hôm nay
     user: "1000:1000"
     ports:
       - "${WEB_PORT:-8088}:8000"
     volumes:
-      - ${DATA_DIR:-./data}:/app/data  # orders.db, qr_cache/, images/ – giữ lại khi build lại image
+      - ${DATA_DIR:-./data}:/app/data  # qr_cache/, images/ – giữ lại khi build lại image
     networks: [default, quan-li-don]
+    depends_on:
+      postgres:
+        condition: service_healthy
     # chỉ kiểm tra web + database (?bot=0); trạng thái bot xem ở /api/health
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health?bot=0', timeout=5)"]
@@ -27,6 +32,35 @@ services:
       timeout: 10s
       start_period: 20s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Postgres (database của web): web nối qua
+  #   DATABASE_URL=postgresql://${PG_USER}:${PG_PASSWORD}@quan-li-don-pg:5432/${PG_DB}
+  # Dữ liệu ở ${PG_DATA_DIR:-./pgdata}. pgAdmin / psql trên chính máy này: localhost:${PG_PORT:-5432}, user / database
+  # = PG_USER / PG_DB (mặc định quanlidon), mật khẩu PG_PASSWORD. Mặc định chỉ mở cho máy này (127.0.0.1); muốn máy khác
+  # trong mạng LAN vào được thì đặt PG_BIND=0.0.0.0 trong .env (lộ database ra mạng – cần mật khẩu mạnh).
+  postgres:
+    image: postgres:16-alpine
+    container_name: quan-li-don-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-quanlidon}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-}
+      POSTGRES_DB: ${PG_DB:-quanlidon}
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ${PG_DATA_DIR:-./pgdata}:/var/lib/postgresql/data
+    ports:
+      - "${PG_BIND:-127.0.0.1}:${PG_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     logging:
       driver: json-file
       options:

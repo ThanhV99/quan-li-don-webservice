@@ -1,6 +1,19 @@
-"""Đọc / định dạng số tiền (VND)."""
+"""Đọc / định dạng số tiền (VND), so khớp tên / SĐT / địa chỉ (hàm thuần: bot tải về chạy tại chỗ)."""
 import os
 import re
+
+
+def name_key(name: str | None) -> str:
+    """Khóa so khớp tên: chữ thường (cả tiếng Việt có dấu), gộp khoảng trắng."""
+    return " ".join((name or "").lower().split())
+
+
+def norm_phone(raw: str | None) -> str:
+    """Chỉ giữ chữ số, +84/84xxxxxxxxx → 0xxxxxxxxx. Trả "" nếu quá ngắn."""
+    d = re.sub(r"\D", "", raw or "")
+    if d.startswith("84") and len(d) == 11:
+        d = "0" + d[2:]
+    return d if len(d) >= 8 else ""
 
 
 def parse_money(text: str) -> int | None:

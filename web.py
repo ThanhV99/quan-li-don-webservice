@@ -54,17 +54,32 @@ campaign_name campaign_stats carrier_names customer_orders delete delete_carrier
 delete_product delete_product_image find_person find_product get get_alert_user get_carrier get_meta get_phone
 get_track_log insert insert_many list_addresses list_alert_users list_campaigns list_carriers list_orders
 list_people list_phones list_products list_sales month_forecast month_orders_not_done month_status_counts
-name_key name_taken norm_phone orders_by_phone orders_by_status person_defaults person_names person_open_orders
+my_phones name_key name_taken norm_phone orders_by_phone orders_by_status person_defaults person_names person_open_orders
 person_qr phone_by_number product_images product_images_map product_name_known product_picks product_price
-remove_alert_user reserve_slot sale_groups save_qr_cache save_track_log search_orders set_all_sales_active
+remove_alert_user reserve_slot sale_groups save_qr_cache save_track_log search_orders sell_part set_all_sales_active split_all split_order
 set_meta set_person_qr set_phone_mine set_phone_used set_product_price set_qr set_sale_group set_vc_alert
 set_vc_near set_vc_next shop_names status_log sync_qr_images unfinished_logs update upsert_alert_user
+""".split())
+# hàm db CHỈ ĐỌC: bot được nhớ kết quả trong 1 lượt xử lý tin nhắn (remote.begin_request; lệnh ghi nào cũng xóa)
+SVC_DB_READ = frozenset("""
+all_rows bot_heartbeat_age campaign_choices campaign_name campaign_stats carrier_names customer_orders find_person
+find_product get get_alert_user get_carrier get_meta get_phone get_track_log list_addresses list_alert_users
+list_campaigns list_carriers list_orders list_people list_phones list_products list_sales month_forecast
+month_orders_not_done month_status_counts my_phones name_key name_taken norm_phone orders_by_phone orders_by_status
+person_defaults person_names person_open_orders person_qr phone_by_number product_images product_images_map
+product_name_known product_picks product_price sale_groups search_orders shop_names status_log unfinished_logs
 """.split())
 # hàm KHÔNG thuần của các module logic (đọc/ghi database, gọi hãng, theo giờ hiện tại); mọi hàm khác của
 # tracking / sale_text / utils / alert_rules chỉ tính từ tham số → bot được nhớ kết quả (đỡ gọi lại money() …)
 SVC_IMPURE = {"tracking": {"delivery_level", "with_saved_fallback", "relevel_order", "save_result",
                            "last_mile_summary", "throttle"}}
 SVC_PURE_DB = {"name_key", "norm_phone"}
+# module thuần bot TẢI MÃ NGUỒN về chạy tại chỗ (đỡ hàng trăm lượt gọi money() … qua mạng khi web ở Render): code chỉ
+# nằm ở web; hằng số (kể cả lấy từ .env của web: VC_*, ADDR_ALIASES) bot ghi đè bằng giá trị bên web (__info__);
+# hàm không thuần (database, gọi hãng, giờ hiện tại) vẫn gọi API. Thứ tự = thứ tự bot nạp (theo import).
+SVC_SOURCE_MODULES = {"utils": utils, "alert_rules": alert_rules, "net": net, "sale_text": sale_text, "tracking": tracking}
+SVC_SOURCE = "__source__"
+SVC_CODE_VERSION = hashlib.sha256(b"".join(Path(m.__file__).read_bytes() for m in SVC_SOURCE_MODULES.values())).hexdigest()[:16]
 rpc.register(tracking.TrackResult, tracking.TrackEvent)
 
 
@@ -91,7 +106,9 @@ def _svc_info(mod: str) -> dict:
     funcs = SVC_FUNCS[mod]
     pure = (SVC_PURE_DB if mod == "db" else
             {n for n, f in funcs.items() if not inspect.iscoroutinefunction(f)} - SVC_IMPURE.get(mod, set()))
-    return {"consts": consts, "funcs": sorted(funcs), "pure": sorted(pure),
+    local = {n: f.__module__ for n, f in funcs.items() if n in pure and f.__module__ in SVC_SOURCE_MODULES and mod == "db"}
+    return {"consts": consts, "funcs": sorted(funcs), "pure": sorted(pure), "local": local, "code_version": SVC_CODE_VERSION,
+            "read": sorted(SVC_DB_READ) if mod == "db" else [],
             "async": sorted(n for n, f in funcs.items() if inspect.iscoroutinefunction(f))}
 
 
@@ -140,6 +157,10 @@ async def svc_call(target: str, request: Request):
     """Bot gọi 1 hàm: target = "<module>.<hàm>", body = rpc {args, kwargs, actor, source}. Lỗi của hàm trả về
     {"error": {type, message}} (HTTP 200) để bot ném lại đúng loại (ValueError ...)."""
     mod, _, fn = target.rpartition(".")
+    if fn == SVC_SOURCE and mod in SVC_SOURCE_MODULES:
+        source = Path(SVC_SOURCE_MODULES[mod].__file__).read_text(encoding="utf-8")
+        return Response(rpc.dumps({"result": {"source": source, "code_version": SVC_CODE_VERSION}}),
+                        media_type="application/json")
     if mod not in SVC_MODULES:
         return JSONResponse({"detail": f"Không có module {mod}"}, status_code=404)
     if fn == SVC_INFO:
@@ -552,7 +573,7 @@ def stats(month: str | None = None):
             (month + "%", db.STATUS_CANCELED)).fetchall())
         # top công của tháng theo người đặt (không tính đơn hủy)
         top_cong = rows(conn.execute(
-            """SELECT ten_nguoi_dat AS ten, COUNT(*) AS so_don, SUM(cong_dat) AS cong, MAX(cong_dat) AS cao_nhat
+            """SELECT MIN(ten_nguoi_dat) AS ten, COUNT(*) AS so_don, SUM(cong_dat) AS cong, MAX(cong_dat) AS cao_nhat
                FROM orders WHERE created_at LIKE ? AND trang_thai != ? AND cong_dat > 0
                GROUP BY name_key(ten_nguoi_dat) ORDER BY cong DESC LIMIT 5""",
             (month + "%", db.STATUS_CANCELED)).fetchall())
@@ -842,9 +863,19 @@ def remove(table: str, rec_id: int):
     return {"ok": True}
 
 
+@app.post("/api/orders/{rec_id}/split")
+async def split(rec_id: int, request: Request):
+    """Tách đơn nhiều cái (không bán): {"qty": k} = tách k cái ra đơn mới; {"all": true} = tách hết thành từng đơn 1 cái.
+    Giá đặt / công / giá shop thu chia theo số cái (db.split_order)."""
+    body = await request.json()
+    ids = db.split_all(rec_id) if body.get("all") else [db.split_order(rec_id, int(body.get("qty") or 0))]
+    return {"order": order_out(db.get("orders", rec_id)), "new_ids": ids}
+
+
 @app.post("/api/orders/{rec_id}/sell")
 async def sell(rec_id: int, request: Request):
-    """Bán xong: nhập giá shop thu 1 cái → lưu tổng, chuyển Hoàn thành (như /ban)."""
+    """Bán xong: nhập giá shop thu 1 cái → lưu tổng, chuyển Hoàn thành (như /ban). qty < số lượng của đơn = bán
+    1 phần: phần còn lại tách thành đơn mới (db.sell_part)."""
     body = await request.json()
     r = db.get("orders", rec_id)
     if not r:
@@ -852,6 +883,12 @@ async def sell(rec_id: int, request: Request):
     if err := db.status_change_error(r["trang_thai"], db.STATUS_DONE):
         raise ValueError(err)
     price = convert("orders", "gia_thu", body.get("price"))
+    sell_qty = int(body.get("qty") or 0)
+    if sell_qty and not 1 <= sell_qty <= qty(r):
+        raise ValueError(f"Đơn #{rec_id} có {qty(r)} cái – số cái bán phải từ 1 tới {qty(r)}")
+    if 0 < sell_qty < qty(r):
+        new_id = db.sell_part(rec_id, sell_qty, price)
+        return {**order_out(db.get("orders", rec_id)), "tach": new_id}
     if price:
         db.update("orders", rec_id, "gia_thu", price * qty(r))
     elif not r["gia_thu"]:

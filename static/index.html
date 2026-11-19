@@ -1040,7 +1040,7 @@ function orderCard(o) {
     <div class="top"><label class="pick" onclick="event.stopPropagation()"><input type="checkbox" ${picked ? "checked" : ""}
         onchange="pickOrder(${o.id},this.checked)"><span class="id"><b>#${o.id}</b> : ${milestoneText(o)}</span></label>${stamp(o.trang_thai)}</div>
     <div class="title">${esc(o.ten_sp || "(chưa ghi sản phẩm)")}${qty}</div>
-    <div class="meta"><span>👤 ${esc(o.ten_nguoi_dat)}</span>${o.ten_tren_don ? `<span title="Tên trên đơn hàng">🪪 ${esc(o.ten_tren_don)}</span>` : ""}${o.chien_dich_ten ? `<span class="badge b-accent" title="Chiến dịch thưởng săn sale">🎁 ${esc(o.chien_dich_ten)}${o.cd_seq ? ` · đơn thứ ${o.cd_seq.n}` : ""}</span>` : ""}${o.cd_seq?.moc_dat ? milestoneBadge(o.cd_seq) : ""}${o.nguon_don ? sanTag(o.nguon_don) : ""}
+    <div class="meta"><span>👤 ${esc(o.ten_nguoi_dat)}</span>${o.ten_tren_don ? `<span title="Tên trên đơn hàng">🪪 ${esc(o.ten_tren_don)}</span>` : ""}${o.chien_dich_ten ? `<span class="badge b-accent" title="Chiến dịch thưởng săn sale">🎁 ${esc(o.chien_dich_ten)}${o.cd_seq ? ` · đơn thứ ${o.cd_seq.n}` : ""}</span>` : ""}${o.cd_seq?.moc_dat ? milestoneBadge(o.cd_seq) : ""}${o.tach_tu ? `<span class="badge b-muted" title="Phần còn lại tách ra khi bán 1 phần đơn #${o.tach_tu}">✂️ tách từ #${o.tach_tu}</span>` : ""}${o.nguon_don ? sanTag(o.nguon_don) : ""}
       ${o.nguon_khach ? `<span>📲 ${esc(o.nguon_khach)}</span>` : ""}${o.sdt ? `<span>📞 ${esc(o.sdt)}</span>` : ""}</div>
     ${o.dia_chi ? `<div class="addr" title="Địa chỉ">🏠 ${esc(o.dia_chi)}</div>` : ""}
     <div class="tear"></div>
@@ -1234,10 +1234,12 @@ async function orderDetail(id) {
   if (o.trang_thai === "Đã đặt") acts.push(`<button class="btn primary" onclick="setStatus(${id},'Đã nhận')" title="Đã nhận hàng, chưa trả công">📦 Đã nhận hàng</button>`);
   if (payable(o)) acts.push(`<button class="btn primary" onclick="payView(${id})">💳 Thanh toán công</button>`);
   if (o.trang_thai === "Thanh toán") acts.push(`<button class="btn ok" onclick="sellForm(${id})">✅ Bán / Hoàn thành</button>`);
+  if ((o.so_luong || 1) > 1 && o.trang_thai !== "Hoàn thành" && o.trang_thai !== "Đã hủy")
+    acts.push(`<button class="btn" onclick="splitForm(${id})" title="Tách đơn nhiều cái thành nhiều đơn (giá đặt / công / giá thu chia theo số cái)">✂️ Tách đơn</button>`);
   if (o.trang_thai !== "Đã hủy" && o.trang_thai !== "Hoàn thành") acts.push(`<button class="btn bad" onclick="setStatus(${id},'Đã hủy')">❌ Hủy đơn</button>`);
   else if (o.trang_thai === "Đã hủy") acts.push(`<button class="btn" onclick="setStatus(${id},'Đã đặt')">↩ Khôi phục</button>`);
   openModal(`${modalHead(`Đơn #${o.id} ${badge(o.trang_thai)}`)}
-    <div class="meta">${milestoneText(o)}</div>
+    <div class="meta">${milestoneText(o)}${o.tach_tu ? ` · ✂️ tách từ đơn #${o.tach_tu} (bán 1 phần)` : ""}</div>
     <table style="margin-top:10px">
       ${row("Sản phẩm", esc(o.ten_sp) + (o.so_luong > 1 ? ` × ${o.so_luong}` : ""))}
       ${row("Người đặt", esc(o.ten_nguoi_dat))}${row("Tên trên đơn", esc(o.ten_tren_don || ""))}${row("Chiến dịch thưởng", o.chien_dich_ten ? "🎁 " + esc(o.chien_dich_ten) + (o.cd_seq ? ` · đơn thứ ${o.cd_seq.n}` : "") + (o.cd_seq?.moc_dat ? " " + milestoneBadge(o.cd_seq) : "") : "")}
@@ -1284,14 +1286,45 @@ async function setStatus(id, st) {
 function sellForm(id) {
   const o = state.orders?.[id];
   const qty = o?.so_luong || 1;
-  $("#extra").innerHTML = `<div class="form">${field(["price", qty > 1 ? `Giá shop thu 1 cái (× ${qty})` : "Giá shop thu", "money",
-      o?.gia_thu ? short(o.gia_thu / qty) : "", {ph: o?.gia_goi_y ? "gợi ý " + o.gia_goi_y : "vd 4tr5", qty, full: true}])}</div>
+  // đơn nhiều cái: chọn số cái bán; bán ít hơn → phần còn lại tách thành đơn mới (giữ trạng thái cũ)
+  const qtyBox = qty > 1 ? `<label>Số cái bán (đơn có ${qty} cái)<input class="input" name="sell_qty" type="number" min="1"
+      max="${qty}" value="${qty}" oninput="sellQtyHint(${qty})"></label><div class="muted" id="sell-qty-hint"></div>` : "";
+  $("#extra").innerHTML = `<div class="form">${field(["price", qty > 1 ? "Giá shop thu 1 cái" : "Giá shop thu", "money",
+      o?.gia_thu ? short(o.gia_thu / qty) : "", {ph: o?.gia_goi_y ? "gợi ý " + o.gia_goi_y : "vd 4tr5", full: true}])}${qtyBox}</div>
     <div class="foot"><button class="btn ok" onclick="sell(${id})">Xác nhận Hoàn thành</button></div>`;
   $("#extra input").focus();
 }
+// tách đơn nhiều cái (không bán): 2 cái → 1 bấm thành 2 đơn 1 cái; nhiều hơn → chọn số cái tách ra hoặc tách hết
+function splitForm(id) {
+  const o = state.orders?.[id]; const n = o?.so_luong || 1;
+  const each = v => v ? short(Math.round(v / n)) : "—";
+  const note = `Mỗi cái ≈ đặt ${each(o?.gia_dat)} · công ${each(o?.cong_dat)} · thu ${each(o?.gia_thu)}. Đơn mới giữ trạng thái, người đặt, mã vận đơn, QR, chiến dịch.`;
+  if (n === 2) {
+    if (confirm(`Tách đơn #${id} (2 cái) thành 2 đơn 1 cái?\n${note}`)) doSplit(id, {all: true});
+    return;
+  }
+  $("#extra").innerHTML = `<div class="form"><label>Số cái tách ra đơn mới (đơn có ${n} cái)<input class="input" name="split_qty"
+      type="number" min="1" max="${n - 1}" value="1"></label><div class="muted">${note}</div></div>
+    <div class="foot"><button class="btn" onclick="doSplit(${id}, {qty: +$('#extra [name=split_qty]').value})">✂️ Tách ra</button>
+      <button class="btn primary" onclick="doSplit(${id}, {all: true})">✂️ Tách hết thành ${n} đơn 1 cái</button></div>`;
+  $("#extra input").focus();
+}
+async function doSplit(id, body) {
+  const r = await post(`/orders/${id}/split`, body);
+  toast(`#${id} ✂️ tách → ${r.new_ids.map(x => "#" + x).join(", ")}`); closeModal(); refresh();
+}
+function sellQtyHint(total) {
+  const n = +($("#extra [name=sell_qty]")?.value || total);
+  $("#sell-qty-hint").textContent = n >= 1 && n < total
+    ? `✂️ Bán ${n}/${total} cái: ${total - n} cái còn lại tách thành đơn mới (giữ trạng thái, giá đặt / công chia theo số cái).` : "";
+}
 async function sell(id) {
-  await post(`/orders/${id}/sell`, {price: $("#extra [name=price]").value});
-  toast(`#${id} ✅ Hoàn thành`); closeModal(); refresh();
+  const total = state.orders?.[id]?.so_luong || 1;
+  const n = +($("#extra [name=sell_qty]")?.value || total);
+  if (n < 1 || n > total) return toast(`Số cái bán phải từ 1 tới ${total}`);
+  const r = await post(`/orders/${id}/sell`, {price: $("#extra [name=price]").value, qty: n});
+  toast(r?.tach ? `#${id} ✅ bán ${n} cái · ${total - n} cái còn lại → đơn #${r.tach}` : `#${id} ✅ Hoàn thành`);
+  closeModal(); refresh();
 }
 // bấm mã vận đơn → mở đơn + hành trình đã lưu trong DB (track_logs), không gọi API hãng
 async function savedTrack(id) {

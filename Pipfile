@@ -11,6 +11,8 @@ uvicorn = "==0.32.1"
 # net.py / tracking.py (tra vận đơn, tải ảnh Telegram)
 httpx = "==0.28.1"
 certifi = "==2026.10.23"
+# database Postgres khi đặt DATABASE_URL (web chạy trên Render); bản binary có sẵn libpq
+psycopg = {version = "==3.3.9", extras = ["binary"]}
 
 [dev-packages]
 

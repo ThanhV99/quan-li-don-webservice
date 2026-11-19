@@ -501,7 +501,7 @@ def last_mile_summary() -> list[dict]:
         orders: dict[str, list] = {}
         for o in conn.execute("SELECT * FROM orders WHERE TRIM(COALESCE(ma_don, '')) != '' ORDER BY id"):
             orders.setdefault(log_key(o["ma_don"]), []).append(o)
-        logs = conn.execute("SELECT * FROM track_logs").fetchall()
+        logs = conn.execute("SELECT * FROM track_logs ORDER BY ma_don").fetchall()  # thứ tự cố định (Postgres không theo thứ tự ghi)
     fails = [fold(k) for k in alert_rules.FAIL_KEYWORDS]
     carriers: dict[str, dict] = {}
     for lg in logs:
@@ -541,12 +541,12 @@ def last_mile_summary() -> list[dict]:
     for c in carriers.values():
         posts = []
         for p in c["posts"].values():
-            items = sorted(p["items"], key=lambda x: x["done"] or x["arrived"], reverse=True)
+            items = sorted(p["items"], key=lambda x: (x["done"] or x["arrived"], x["ma_don"]), reverse=True)  # ngang giờ → theo mã
             hours = [x["hours"] for x in items if x["hours"] is not None]
             couriers = sorted(p["couriers"].values(), key=lambda k: (-k["don"], k["name"]))
             for k in couriers:
                 k["first"], k["last"] = f"{k['first']:%Y-%m-%d}", f"{k['last']:%Y-%m-%d}"
-                k["dia_chi"] = [{"dc": dc, "n": n} for dc, n in sorted(k["dia_chi"].items(), key=lambda x: -x[1])]
+                k["dia_chi"] = [{"dc": dc, "n": n} for dc, n in sorted(k["dia_chi"].items(), key=lambda x: (-x[1], x[0]))]
             posts.append({"post": p["post"], "don": len(items),
                           "delivered": sum(x["state"] == "delivered" for x in items),
                           "dang_giao": sum(x["state"] in ("giao", "post") for x in items),
@@ -556,4 +556,4 @@ def last_mile_summary() -> list[dict]:
         posts.sort(key=lambda p: (-p["don"], p["post"]))
         out.append({"carrier": c["carrier"], "don": sum(p["don"] for p in posts),
                     "has_names": any(p["couriers"] for p in posts), "posts": posts})
-    return sorted(out, key=lambda c: -c["don"])
+    return sorted(out, key=lambda c: (-c["don"], c["carrier"]))
