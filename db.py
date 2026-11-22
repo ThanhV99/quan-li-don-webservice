@@ -3,6 +3,7 @@ import decimal
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -15,53 +16,109 @@ import rpc
 import sale_text
 from utils import name_key, norm_phone, price_after_discount  # noqa: F401 – bot gọi db.name_key / db.norm_phone
 
-# thư mục file của web (database là Postgres): ảnh QR / ảnh sản phẩm tải sẵn, ảnh QR theo tên người đặt.
-# Docker: /app/data (volume ./data); chạy tại chỗ: web/data.
+log = logging.getLogger("db")
+
+# thư mục file của web: bản chép ảnh QR theo tên người đặt (cho dễ xem trên máy). Bản gốc mọi ảnh nằm trong
+# database (bảng image_files). Docker: /app/data (volume ./data); chạy tại chỗ: web/data; Vercel: /tmp/….
 FILES_DIR = os.getenv("FILES_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
-# ảnh QR (file_id Telegram) lưu ra đĩa: bot gửi ngay khi nhận ảnh, web đọc để hiện tức thì
-QR_CACHE_DIR = os.path.join(FILES_DIR, "qr_cache")
+# trước 11/2026 ảnh tải về nằm ở đĩa (data/qr_cache, tên = băm file_id): chỉ còn đọc để chép vào database
+LEGACY_CACHE_DIR = os.path.join(FILES_DIR, "qr_cache")
 
 
-def qr_cache_path(file_id: str) -> str:
-    return os.path.join(QR_CACHE_DIR, hashlib.sha256(file_id.encode()).hexdigest()[:32] + ".jpg")
+def legacy_cache_path(file_id: str) -> str:
+    return os.path.join(LEGACY_CACHE_DIR, hashlib.sha256(file_id.encode()).hexdigest()[:32] + ".jpg")
 
 
 # ảnh QR đặt tên dễ đọc theo người đặt: data/images/qr/<tên>.jpg (tự đồng bộ, xem sync_qr_images)
 QR_IMAGES_DIR = os.path.join(FILES_DIR, "images", "qr")
+QR_IMAGES_INDEX = ".file_ids.json"  # {tên file: file_id đã chép} → chỉ đọc ảnh từ database khi QR đổi
 
 
 def sync_qr_images() -> int:
-    """Chép QR đã có trong qr_cache ra QR_IMAGES_DIR theo tên người đặt; xóa file của người không còn / hết QR.
-    Gọi lại thoải mái (chỉ ghi file thay đổi). Trả về số file đang có."""
+    """Chép QR (ảnh trong database) ra QR_IMAGES_DIR theo tên người đặt; xóa file của người không còn / hết QR.
+    Gọi lại thoải mái (chỉ đọc + ghi file của QR mới / đã đổi). Trả về số file đang có."""
     os.makedirs(QR_IMAGES_DIR, exist_ok=True)
+    index_path = os.path.join(QR_IMAGES_DIR, QR_IMAGES_INDEX)
+    try:
+        with open(index_path, encoding="utf-8") as f:
+            done = json.load(f)
+    except (OSError, ValueError):
+        done = {}
     with connect() as conn:
-        people = conn.execute("SELECT ten, qr_file_id FROM nguoi_dat WHERE qr_file_id IS NOT NULL").fetchall()
-    wanted = {}
-    for p in people:
-        src = qr_cache_path(p["qr_file_id"])
-        if os.path.exists(src):
-            name = re.sub(r'[\\/:*?"<>|]+', "_", " ".join(p["ten"].split())) + ".jpg"
-            wanted[name] = src
-    for name, src in wanted.items():
+        people = conn.execute("SELECT n.ten, n.qr_file_id FROM nguoi_dat n "
+                              "JOIN image_files i ON i.file_id = n.qr_file_id").fetchall()
+    wanted = {re.sub(r'[\\/:*?"<>|]+', "_", " ".join(p["ten"].split())) + ".jpg": p["qr_file_id"] for p in people}
+    for name, file_id in wanted.items():
         dst = os.path.join(QR_IMAGES_DIR, name)
-        with open(src, "rb") as f:
-            data = f.read()
-        if not os.path.exists(dst) or open(dst, "rb").read() != data:
-            with open(dst + ".tmp", "wb") as f:
-                f.write(data)
-            os.replace(dst + ".tmp", dst)
+        if done.get(name) != file_id or not os.path.exists(dst):
+            if (data := get_image(file_id)) is not None:
+                with open(dst + ".tmp", "wb") as f:
+                    f.write(data)
+                os.replace(dst + ".tmp", dst)
     for name in os.listdir(QR_IMAGES_DIR):
-        if name not in wanted:
+        if name not in wanted and name != QR_IMAGES_INDEX:
             os.remove(os.path.join(QR_IMAGES_DIR, name))
-    return len(wanted)
+    have = {name: fid for name, fid in wanted.items() if os.path.exists(os.path.join(QR_IMAGES_DIR, name))}
+    if have != done:
+        with open(index_path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(have, f, ensure_ascii=False)
+        os.replace(index_path + ".tmp", index_path)
+    return len(have)
 
 
-def save_qr_cache(file_id: str, data: bytes):
-    os.makedirs(QR_CACHE_DIR, exist_ok=True)
-    path = qr_cache_path(file_id)
-    with open(path + ".tmp", "wb") as f:
-        f.write(data)
-    os.replace(path + ".tmp", path)
+# ---------- ảnh (QR trả công, ảnh sản phẩm): bản gốc lưu trong database ----------
+# Đơn / người đặt / ảnh sản phẩm giữ file_id Telegram (bot gửi lại ảnh bằng file_id cho nhanh); bảng image_files giữ
+# chính file ảnh theo file_id → web hiện ảnh không cần Telegram, sao lưu database là có cả ảnh, đổi bot / file_id
+# hỏng vẫn còn ảnh (bot gửi bằng dữ liệu ảnh rồi đổi sang file_id mới: replace_file_id).
+IMAGE_KEEP_DAYS = 1  # ảnh không còn ai dùng (đổi QR, xóa người, xóa ảnh sản phẩm…) giữ thêm chừng này ngày rồi xóa
+_IMAGE_REFS = ("SELECT qr_file_id AS f FROM nguoi_dat UNION SELECT qr_file_id FROM orders "
+               "UNION SELECT file_id FROM product_images")
+
+
+def save_image(file_id: str, data: bytes):
+    """Lưu ảnh (bot lưu ngay khi nhận ảnh QR / ảnh sản phẩm, web khi tải lên / tải từ Telegram)."""
+    with connect() as conn:
+        conn.execute("INSERT INTO image_files (file_id, data, created_at) VALUES (?, ?, ?) ON CONFLICT (file_id) "
+                     "DO UPDATE SET data = excluded.data, created_at = excluded.created_at", (file_id, data, _now()))
+
+
+def get_image(file_id: str) -> bytes | None:
+    with connect() as conn:
+        r = conn.execute("SELECT data FROM image_files WHERE file_id = ?", (file_id,)).fetchone()
+    return r[0] if r else None
+
+
+def missing_images() -> list[str]:
+    """file_id đang dùng (QR người đặt / đơn, ảnh sản phẩm) mà database chưa có ảnh."""
+    with connect() as conn:
+        return [r[0] for r in conn.execute(
+            f"SELECT f FROM ({_IMAGE_REFS}) u WHERE f IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM image_files i WHERE i.file_id = u.f) ORDER BY f")]
+
+
+def prune_images() -> int:
+    """Xóa ảnh không còn ai dùng, lưu đã quá IMAGE_KEEP_DAYS ngày (ảnh vừa nhận trong lúc /them chưa xong
+    thì chưa gắn vào đơn nào – giữ lại). Trả về số ảnh đã xóa."""
+    cutoff = (datetime.now() - timedelta(days=IMAGE_KEEP_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as conn:
+        return conn.execute(
+            f"DELETE FROM image_files WHERE created_at < ? AND file_id NOT IN "
+            f"(SELECT f FROM ({_IMAGE_REFS}) u WHERE f IS NOT NULL)", (cutoff,)).rowcount
+
+
+def replace_file_id(old: str, new: str):
+    """file_id cũ hỏng (đổi bot…), bot đã gửi lại ảnh bằng dữ liệu trong database và Telegram cấp file_id mới →
+    đổi mọi chỗ dùng sang file_id mới (ảnh trong database giữ nguyên)."""
+    if not new or new == old:
+        return
+    with connect() as conn:
+        conn.execute("UPDATE nguoi_dat SET qr_file_id = ? WHERE qr_file_id = ?", (new, old))
+        conn.execute("UPDATE orders SET qr_file_id = ? WHERE qr_file_id = ?", (new, old))
+        conn.execute("UPDATE product_images SET file_id = ? WHERE file_id = ?", (new, old))
+        if conn.execute("SELECT 1 FROM image_files WHERE file_id = ?", (new,)).fetchone():
+            conn.execute("DELETE FROM image_files WHERE file_id = ?", (old,))
+        else:
+            conn.execute("UPDATE image_files SET file_id = ? WHERE file_id = ?", (new, old))
 
 # Các trường của từng bảng: (tên cột, nhãn hiển thị)
 ORDER_FIELDS = [
@@ -292,10 +349,17 @@ CREATE TABLE IF NOT EXISTS web_users (
 CREATE TABLE IF NOT EXISTS product_images (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     ten_key     TEXT NOT NULL,          -- name_key(tên sản phẩm / ten_sp của món sale)
-    file_id     TEXT NOT NULL,          -- file_id Telegram của bot chính (ảnh lưu đĩa ở qr_cache như ảnh QR)
+    file_id     TEXT NOT NULL,          -- file_id Telegram của bot chính (ảnh lưu ở image_files như ảnh QR)
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_product_images_key ON product_images(ten_key);
+
+-- ảnh gốc theo file_id Telegram (QR trả công, ảnh sản phẩm): web hiện ảnh từ đây, không cần Telegram (save_image)
+CREATE TABLE IF NOT EXISTS image_files (
+    file_id     TEXT PRIMARY KEY,
+    data        BLOB NOT NULL,          -- file ảnh (JPEG)
+    created_at  TEXT NOT NULL           -- lúc lưu (prune_images giữ ảnh chưa ai dùng ít nhất IMAGE_KEEP_DAYS)
+);
 
 -- sổ địa chỉ đặt hàng (bot /diachi, web tab 📍 Địa chỉ): mỗi dòng 1 ô văn bản tự do
 CREATE TABLE IF NOT EXISTS addresses (
@@ -341,7 +405,7 @@ CREATE TABLE IF NOT EXISTS sales (
 # ---------- Postgres (DATABASE_URL, bắt buộc – từ 11/2026 không còn SQLite) ----------
 # Câu SQL trong file viết kiểu cũ (dấu ?, kiểu INTEGER / REAL / TEXT, INSERT … ON CONFLICT, RETURNING); lớp _PgConn
 # đổi sang Postgres: ? / :tên → %s / %(tên)s, LIKE → ILIKE (không phân biệt hoa thường), kiểu cột (INTEGER → BIGINT,
-# REAL → DOUBLE PRECISION, TEXT → TEXT COLLATE "C" = so / sắp theo byte), PRAGMA table_info → information_schema,
+# REAL → DOUBLE PRECISION, BLOB → BYTEA, TEXT → TEXT COLLATE "C" = so / sắp theo byte), PRAGMA table_info → information_schema,
 # kết quả Decimal / bool → int / float.
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
@@ -359,6 +423,7 @@ _PG_TYPE_RULES = [
     (re.compile(r"\bINTEGER\s+PRIMARY\s+KEY(\s+AUTOINCREMENT)?\b", re.I), "BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY"),
     (re.compile(r"\bINTEGER\b", re.I), "BIGINT"),
     (re.compile(r"\bREAL\b", re.I), "DOUBLE PRECISION"),
+    (re.compile(r"\bBLOB\b", re.I), "BYTEA"),
 ]
 _PG_TEXT = re.compile(r"\bTEXT\b(?!\s+COLLATE)", re.I)
 _PG_NOCASE = re.compile(r"\s+COLLATE\s+NOCASE\b", re.I)
@@ -663,6 +728,21 @@ def init_db():
             conn.execute("DROP INDEX IF EXISTS idx_sales_active")
             conn.execute("ALTER TABLE sales DROP COLUMN loai")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_active ON sales(active)")
+    enable_row_security()
+
+
+def enable_row_security():
+    """Bật Row Level Security cho mọi bảng chưa bật (Supabase: chặn đọc / ghi bảng qua Data API bằng khóa công khai,
+    vd ảnh QR, tài khoản web). Web là chủ bảng nên không bị chặn (Postgres cho chủ bảng bỏ qua RLS khi không FORCE);
+    không phải chủ bảng thì không ALTER được → bỏ qua."""
+    try:
+        with connect() as conn:
+            for r in conn.execute("SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                                  "WHERE n.nspname = current_schema() AND c.relkind = 'r' AND NOT c.relrowsecurity "
+                                  "ORDER BY c.relname").fetchall():
+                conn.execute(f'ALTER TABLE "{r[0]}" ENABLE ROW LEVEL SECURITY')
+    except Exception as e:  # noqa: BLE001
+        log.warning("Không bật được Row Level Security: %s", e)
 
 
 # ai đang đổi dữ liệu, ghi vào order_status_log: SOURCE theo tiến trình ("bot" / "web", đặt lúc khởi động),

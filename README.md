@@ -15,7 +15,10 @@ docker compose exec web python manage.py createadmin <tên>   # tài khoản web
 ```
 
 Web chạy ở `http://<máy chủ>:8088` (`WEB_PORT`). Database Postgres nằm trong `./pgdata/` (`PG_DATA_DIR`), mở cho pgAdmin / psql
-trên chính máy này ở `localhost:5432`. Ảnh QR / sản phẩm tải sẵn nằm trong `./data/` (`DATA_DIR`). Cả hai không đưa lên git.
+trên chính máy này ở `localhost:5432`. Ảnh QR / ảnh sản phẩm lưu **trong database** (bảng `image_files`, theo `file_id`
+Telegram), nên sao lưu database là có cả ảnh; `./data/` (`DATA_DIR`) chỉ giữ bản chép QR theo tên người đặt
+(`images/qr/<tên>.jpg`). Cả hai không đưa lên git. Web tự bật Row Level Security cho mọi bảng (chặn Data API của
+Supabase; web là chủ bảng nên không bị ảnh hưởng).
 
 ### Sao lưu / khôi phục
 
@@ -28,7 +31,8 @@ docker compose exec web python manage.py import-sqlite /app/data/<file>.db [--re
 ### Chạy trên Render (Postgres ở nơi khác)
 
 Web Service · Runtime Docker · repo này · Region Singapore · Health check `/api/health?bot=0`. Environment: các biến trong
-`env.example` (không cần `PROXY_URL`, `PG_*`) + `DATABASE_URL` (Supabase / Neon / Render Postgres), `FORWARDED_ALLOW_IPS=*`.
+`env.example` (không cần `PROXY_URL`, `PG_*`) + `DATABASE_URL` (Supabase / Neon / Render Postgres), `FORWARDED_ALLOW_IPS=*`,
+`FILES_DIR=/tmp/quanlidon` (đĩa không giữ lâu; ảnh đã nằm trong database).
 Cổng lấy từ `PORT` của Render.
 
 Chạy trực tiếp (phát triển, cần 1 Postgres): `pipenv install && DATABASE_URL=postgresql://… pipenv run uvicorn web:app --port 8088`.

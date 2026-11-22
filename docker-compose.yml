@@ -14,13 +14,13 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      FILES_DIR: /app/data  # ảnh QR / sản phẩm tải sẵn
+      FILES_DIR: /app/data  # bản chép ảnh QR theo tên (ảnh gốc trong database)
       TZ: Asia/Ho_Chi_Minh  # giờ VN cho ngày tạo đơn / thống kê hôm nay
     user: "1000:1000"
     ports:
       - "${WEB_PORT:-8088}:8000"
     volumes:
-      - ${DATA_DIR:-./data}:/app/data  # qr_cache/, images/ – giữ lại khi build lại image
+      - ${DATA_DIR:-./data}:/app/data  # images/qr/ (+ qr_cache/ cũ: web chép vào database lúc khởi động)
     networks: [default, quan-li-don]
     depends_on:
       postgres:

@@ -1,4 +1,4 @@
-# Project web: FastAPI + database (giữ data/orders.db) + toàn bộ logic (tra vận đơn, sale, tiền) + API cho bot.
+# Project web: FastAPI + database Postgres (cả ảnh QR / sản phẩm) + toàn bộ logic (tra vận đơn, sale, tiền) + API cho bot.
 # Build: cd web && docker compose build   (context = thư mục web/)
 # cố định bản Python + digest (build lại ra đúng image, không tự đổi bản vá); nâng cấp: đổi cả tag lẫn digest
 FROM python:3.12.15-slim-trixie@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2
@@ -21,7 +21,7 @@ COPY *.py ./
 COPY certs ./certs
 COPY static ./static
 
-# Ảnh tải sẵn (QR, sản phẩm) nằm trong volume /app/data để không mất khi build lại image; database là Postgres
+# /app/data: bản chép ảnh QR theo tên người đặt (images/qr/) – ảnh gốc nằm trong database
 VOLUME ["/app/data"]
 
 USER 1000:1000

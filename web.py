@@ -51,19 +51,19 @@ SVC_MODULES = {"db": db, "tracking": tracking, "sale_text": sale_text, "utils": 
 SVC_DB_FUNCS = frozenset("""
 add_address add_carrier add_phone add_product add_product_image all_rows bot_heartbeat_age campaign_choices
 campaign_name campaign_stats carrier_names customer_orders delete delete_carrier delete_person delete_phone
-delete_product delete_product_image find_person find_product get get_alert_user get_carrier get_meta get_phone
+delete_product delete_product_image find_person find_product get get_alert_user get_carrier get_image get_meta get_phone
 get_track_log insert insert_many list_addresses list_alert_users list_campaigns list_carriers list_orders
 list_people list_phones list_products list_sales month_forecast month_orders_not_done month_status_counts
 my_phones name_key name_taken norm_phone orders_by_phone orders_by_status person_defaults person_names person_open_orders
 person_qr phone_by_number product_images product_images_map product_name_known product_picks product_price
-remove_alert_user reserve_slot sale_groups save_qr_cache save_track_log search_orders sell_part set_all_sales_active split_all split_order
+remove_alert_user replace_file_id reserve_slot sale_groups save_image save_track_log search_orders sell_part set_all_sales_active split_all split_order
 set_meta set_person_qr set_phone_mine set_phone_used set_product_price set_qr set_sale_group set_vc_alert
 set_vc_near set_vc_next shop_names status_log sync_qr_images unfinished_logs update upsert_alert_user
 """.split())
 # hàm db CHỈ ĐỌC: bot được nhớ kết quả trong 1 lượt xử lý tin nhắn (remote.begin_request; lệnh ghi nào cũng xóa)
 SVC_DB_READ = frozenset("""
 all_rows bot_heartbeat_age campaign_choices campaign_name campaign_stats carrier_names customer_orders find_person
-find_product get get_alert_user get_carrier get_meta get_phone get_track_log list_addresses list_alert_users
+find_product get get_alert_user get_carrier get_image get_meta get_phone get_track_log list_addresses list_alert_users
 list_campaigns list_carriers list_orders list_people list_phones list_products list_sales month_forecast
 month_orders_not_done month_status_counts my_phones name_key name_taken norm_phone orders_by_phone orders_by_status
 person_defaults person_names person_open_orders person_qr phone_by_number product_images product_images_map
@@ -832,7 +832,7 @@ async def product_image(img_id: int):
     r = db.get_product_image(img_id)
     if not r:
         raise HTTPException(404, "Không có ảnh")
-    return Response(await telegram_file(r["file_id"]), media_type="image/jpeg",
+    return Response(await image_bytes(r["file_id"]), media_type="image/jpeg",
                     headers={"Cache-Control": "private, max-age=604800"})
 
 
@@ -955,58 +955,58 @@ def _track_out(res) -> dict:
     }
 
 
-# ảnh QR lưu ra đĩa (db.qr_cache_path): bot ghi ngay khi nhận ảnh; QR cũ / bot lỡ chưa ghi thì web tự tải
+# ảnh (QR, ảnh sản phẩm) lưu trong database (db.image_files): bot lưu ngay khi nhận ảnh; ảnh còn thiếu (nằm ở thư mục
+# đĩa cũ data/qr_cache, hoặc bot lỡ chưa lưu) thì web tự chép / tải từ Telegram rồi lưu vào database
 QR_PREFETCH_MINUTES = 10
-_qr_locks: dict[str, asyncio.Lock] = {}
+_image_locks: dict[str, asyncio.Lock] = {}
 
 
-def _qr_path(file_id: str) -> Path:
-    return Path(db.qr_cache_path(file_id))
-
-
-async def telegram_file(file_id: str) -> bytes:
-    """Ảnh QR (file_id của bot chính): lấy từ đĩa, chưa có thì tải từ Telegram (getFile + tải file)."""
-    path = _qr_path(file_id)
-    if path.exists():
-        return path.read_bytes()
-    async with _qr_locks.setdefault(file_id, asyncio.Lock()):  # 2 request cùng lúc chỉ tải 1 lần
-        if path.exists():
-            return path.read_bytes()
-        api = f"https://api.telegram.org/bot{BOT_TOKEN}"
-        info = (await net.request("GET", f"{api}/getFile", params={"file_id": file_id})).json()
-        if not info.get("ok"):
-            raise HTTPException(404, "Không tải được ảnh QR")
-        resp = await net.request("GET", f"https://api.telegram.org/file/bot{BOT_TOKEN}/{info['result']['file_path']}",
-                                 timeout=30)
-        db.save_qr_cache(file_id, resp.content)
-        return resp.content
+async def image_bytes(file_id: str) -> bytes:
+    """Ảnh theo file_id: lấy trong database; chưa có thì chép từ thư mục đĩa cũ (trước 11/2026) hoặc tải từ Telegram
+    (getFile + tải file) bằng BOT_TOKEN, rồi lưu vào database."""
+    if (data := db.get_image(file_id)) is not None:
+        return data
+    async with _image_locks.setdefault(file_id, asyncio.Lock()):  # 2 request cùng lúc chỉ tải 1 lần
+        if (data := db.get_image(file_id)) is not None:
+            return data
+        legacy = Path(db.legacy_cache_path(file_id))
+        if legacy.exists():
+            data = legacy.read_bytes()
+        else:
+            if not BOT_TOKEN:
+                raise HTTPException(404, "Database chưa có ảnh này (thiếu BOT_TOKEN để tải từ Telegram)")
+            api = f"https://api.telegram.org/bot{BOT_TOKEN}"
+            info = (await net.request("GET", f"{api}/getFile", params={"file_id": file_id})).json()
+            if not info.get("ok"):
+                raise HTTPException(404, "Không tải được ảnh từ Telegram")
+            data = (await net.request("GET", f"https://api.telegram.org/file/bot{BOT_TOKEN}/"
+                                             f"{info['result']['file_path']}", timeout=30)).content
+        db.save_image(file_id, data)
+    _image_locks.pop(file_id, None)
+    return data
 
 
 async def prefetch_qr_loop():
-    """Tải sẵn QR của mọi người đặt / đơn để bấm xem là hiện ngay."""
+    """Mỗi QR_PREFETCH_MINUTES phút: lưu vào database ảnh còn thiếu của mọi QR / ảnh sản phẩm đang dùng, xóa ảnh
+    không còn ai dùng, cập nhật thư mục ảnh QR theo tên (cả thay đổi làm qua bot: đổi tên, xóa người…)."""
     while True:
-        with db.connect() as conn:
-            ids = [r[0] for r in conn.execute(
-                "SELECT qr_file_id FROM nguoi_dat WHERE qr_file_id IS NOT NULL "
-                "UNION SELECT qr_file_id FROM orders WHERE qr_file_id IS NOT NULL "
-                "UNION SELECT file_id FROM product_images")]
-        for file_id in ids:
-            if not _qr_path(file_id).exists():
+        try:
+            for file_id in db.missing_images():
                 try:
-                    await telegram_file(file_id)
-                except Exception as e:  # mạng lỗi → lần sau tải lại
-                    log.warning("Không tải sẵn được QR: %s", e)
-        try:  # cả thay đổi làm qua bot (đổi tên, xóa người…)
+                    await image_bytes(file_id)
+                except Exception as e:  # noqa: BLE001 – mạng lỗi → lần sau tải lại
+                    log.warning("Không lấy được ảnh %s…: %s", file_id[:16], getattr(e, "detail", e))
+            if n := db.prune_images():
+                log.info("Đã xóa %d ảnh không còn dùng", n)
             db.sync_qr_images()
-        except OSError as e:
-            log.warning("Không đồng bộ được thư mục ảnh QR: %s", e)
+        except Exception as e:  # noqa: BLE001 – database / đĩa lỗi: vòng sau thử lại
+            log.warning("Vòng đồng bộ ảnh lỗi: %s", e)
         await asyncio.sleep(QR_PREFETCH_MINUTES * 60)
 
 
 @app.on_event("startup")
 async def start_prefetch():
-    if BOT_TOKEN:
-        asyncio.create_task(prefetch_qr_loop())
+    asyncio.create_task(prefetch_qr_loop())
 
 
 QR_TABLES = {"order": "orders", "person": "nguoi_dat"}
@@ -1055,12 +1055,12 @@ async def read_image(request: Request) -> tuple[bytes, str]:
 
 
 async def store_upload(data: bytes, ctype: str) -> str:
-    """Ảnh tải lên → file_id Telegram (bot dùng được) + lưu đĩa để web hiện ngay."""
+    """Ảnh tải lên → file_id Telegram (bot dùng được) + lưu ảnh vào database."""
     file_id = await upload_qr(data, ctype)
     if ctype in ("image/jpeg", "image/jpg"):
-        db.save_qr_cache(file_id, data)
+        db.save_image(file_id, data)  # lưu luôn ảnh gốc
     else:
-        await telegram_file(file_id)
+        await image_bytes(file_id)  # png/webp…: lấy bản JPEG Telegram đã chuyển
     return file_id
 
 
@@ -1071,15 +1071,11 @@ async def set_qr(kind: str, rec_id: int, request: Request):
     if not table or not db.get(table, rec_id):
         raise HTTPException(404, "Không tìm thấy")
     data, ctype = await read_image(request)
-    file_id = await upload_qr(data, ctype)
+    file_id = await store_upload(data, ctype)
     if kind == "person":
         db.set_person_qr(rec_id, file_id)
     else:
         db.set_qr(rec_id, file_id)
-    if ctype in ("image/jpeg", "image/jpg"):
-        db.save_qr_cache(file_id, data)  # lưu luôn ảnh gốc, khỏi tải lại từ Telegram
-    else:
-        await telegram_file(file_id)  # png/webp…: lấy bản JPEG Telegram đã chuyển
     return {"qr_v": qr_version(file_id)}
 
 
@@ -1104,7 +1100,7 @@ async def qr(kind: str, rec_id: int, download: int = 0):
     if download:  # nút ⬇️ Tải ảnh: tên file theo người đặt
         name = r["ten"] if kind == "person" else r["ten_nguoi_dat"]
         headers["Content-Disposition"] = f"attachment; filename=\"QR.jpg\"; filename*=UTF-8''{quote(f'QR {name}.jpg')}"
-    return Response(await telegram_file(r["qr_file_id"]), media_type="image/jpeg", headers=headers)
+    return Response(await image_bytes(r["qr_file_id"]), media_type="image/jpeg", headers=headers)
 
 
 # ---------- săn sale ----------
