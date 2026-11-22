@@ -131,6 +131,7 @@ ORDER_FIELDS = [
     ("nguon_don", "Nguồn đơn"),
     ("gia_dat", "Giá đặt"),
     ("gia_thu", "Giá shop thu"),
+    ("bonus_thu", "Bonus thu"),  # tiền thu thêm cả đơn (không nhân số lượng), cộng vào thu khi tính lãi (order_thu)
     ("cong_dat", "Công đặt"),
     ("sdt", "SĐT"),
     ("dia_chi", "Địa chỉ"),
@@ -206,7 +207,7 @@ TABLES = {"orders": ORDER_FIELDS, "sales": SALE_FIELDS, "products": PRODUCT_FIEL
           "addresses": ADDRESS_FIELDS}
 # cột lưu được khi insert nhưng không hiện / sửa như trường thường
 EXTRA_COLUMNS = {"orders": ["qr_file_id"], "sales": [], "products": [], "addresses": []}  # chỉ bảng có db.insert
-MONEY_FIELDS = {"gia_dat", "gia_thu", "cong_dat", "gia_goc", "giam_toi_da", "gia_sale", "gia_sale_max", "cong", "cong_max",
+MONEY_FIELDS = {"gia_dat", "gia_thu", "bonus_thu", "cong_dat", "gia_goc", "giam_toi_da", "gia_sale", "gia_sale_max", "cong", "cong_max",
                 "gia_goi_y", "gia_goi_y_max"}
 # trường tiền nhận khoảng giá → cột lưu giá trị lớn
 RANGE_FIELDS = {"gia_sale": "gia_sale_max", "cong": "cong_max", "gia_goi_y": "gia_goi_y_max"}
@@ -223,6 +224,7 @@ CREATE TABLE IF NOT EXISTS orders (
     nguon_don     TEXT,             -- Shopee / TikTok
     gia_dat       INTEGER DEFAULT 0,
     gia_thu       INTEGER DEFAULT 0,
+    bonus_thu     INTEGER DEFAULT 0,  -- thu thêm (cả đơn), cộng vào giá shop thu khi tính lãi
     cong_dat      INTEGER DEFAULT 0,
     sdt           TEXT,
     dia_chi       TEXT,
@@ -680,6 +682,8 @@ def init_db():
             conn.execute("ALTER TABLE orders ADD COLUMN ten_tren_don TEXT")
         if "chien_dich" not in cols:
             conn.execute("ALTER TABLE orders ADD COLUMN chien_dich INTEGER")
+        if "bonus_thu" not in cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN bonus_thu INTEGER DEFAULT 0")
         if "tach_tu" not in cols:  # đơn tách ra khi bán 1 phần (sell_part): id đơn gốc
             conn.execute("ALTER TABLE orders ADD COLUMN tach_tu INTEGER")
         # bỏ "công tối thiểu" của chiến dịch (thay bằng chọn chiến dịch cho từng đơn)
@@ -1043,14 +1047,15 @@ def month_orders_not_done(month: str):
 def month_stats(month: str):
     """Thống kê 1 tháng ('2026-10'), không tính đơn hủy, gom theo (đã hoàn thành?, sàn).
 
-    Mỗi dòng: hoan_thanh (1/0), nguon_don, so_don, tong_dat, tong_cong, tong_thu.
+    Mỗi dòng: hoan_thanh (1/0), nguon_don, so_don, tong_dat, tong_cong, tong_thu (giá shop thu + bonus thu).
     """
     with connect() as conn:
         return conn.execute(
             """SELECT (trang_thai = :done) AS hoan_thanh, nguon_don, COUNT(*) AS so_don,
                       COALESCE(SUM(gia_dat), 0) AS tong_dat,
                       COALESCE(SUM(cong_dat), 0) AS tong_cong,
-                      COALESCE(SUM(gia_thu), 0) AS tong_thu
+                      COALESCE(SUM(gia_thu), 0)
+                        + COALESCE(SUM(CASE WHEN gia_thu > 0 THEN bonus_thu ELSE 0 END), 0) AS tong_thu
                FROM orders WHERE created_at LIKE :prefix AND trang_thai != :canceled
                GROUP BY hoan_thanh, nguon_don ORDER BY hoan_thanh DESC, so_don DESC""",
             {"done": STATUS_DONE, "canceled": STATUS_CANCELED, "prefix": month + "%"}).fetchall()
@@ -1064,10 +1069,17 @@ def month_status_counts(month: str) -> dict:
     return {st: counts.get(st, 0) for st in STATUSES}
 
 
+def order_thu(r) -> int:
+    """Tiền thu của 1 đơn = giá shop thu + bonus thu (người dùng yêu cầu 11/2026: shop thu 8tr + bonus 100k → 8tr1).
+    Đơn chưa có giá shop thu (chưa bán) → 0, bonus chưa tính."""
+    thu = r["gia_thu"] or 0
+    return thu + ((r["bonus_thu"] or 0) if "bonus_thu" in r.keys() else 0) if thu else 0
+
+
 def month_forecast(month: str = "") -> dict:
     """Thu / lãi của các đơn không hủy trong tháng ('' = mọi tháng), theo trạng thái.
 
-    Chỉ dùng giá shop thu đã nhập của từng đơn (không dùng giá gợi ý sản phẩm). Đơn chưa có giá shop thu
+    Chỉ dùng giá shop thu (+ bonus thu, order_thu) đã nhập của từng đơn (không dùng giá gợi ý sản phẩm). Đơn chưa có giá shop thu
     (0 / bỏ trống) thu = 0, không tính phần thu − giá đặt − công vào lãi, đếm ở thieu_gia.
     Thưởng chiến dịch (người dùng yêu cầu 11/2026): mỗi lần người đặt đạt mốc, tiền thưởng tính là chi phí của
     đơn mốc (db.campaign_order_seq, moc_dat) → nằm ở tháng / trạng thái của đơn đó và luôn trừ vào lãi.
@@ -1076,7 +1088,7 @@ def month_forecast(month: str = "") -> dict:
     """
     with connect() as conn:
         orders = conn.execute(
-            """SELECT id, trang_thai, gia_dat, cong_dat, gia_thu FROM orders
+            """SELECT id, trang_thai, gia_dat, cong_dat, gia_thu, bonus_thu FROM orders
                WHERE created_at LIKE ? AND trang_thai != ?""", (month + "%", STATUS_CANCELED)).fetchall()
     seq = campaign_order_seq()
     keys = ("so_don", "gia_dat", "cong", "thuong", "so_moc", "chi", "thu", "chi_co_gia", "lai", "thieu_gia")
@@ -1094,7 +1106,7 @@ def month_forecast(month: str = "") -> dict:
             r["so_moc"] += 1
             r["lai"] -= thuong
         r["chi"] += chi + thuong
-        thu = o["gia_thu"] or 0
+        thu = order_thu(o)
         if thu:
             r["thu"] += thu
             r["chi_co_gia"] += chi
@@ -1826,8 +1838,8 @@ def split_order(order_id: int, qty: int) -> int:
         raise ValueError(f"Đơn #{order_id} đang {r['trang_thai']} – không tách được")
     share = lambda total: None if total is None else round(total * qty / n)  # noqa: E731
     new = {"so_luong": qty, "tach_tu": order_id,
-           **{f: share(r[f]) for f in ("gia_dat", "cong_dat", "gia_thu")}}
-    keep = {"so_luong": n - qty, **{f: None if r[f] is None else r[f] - new[f] for f in ("gia_dat", "cong_dat", "gia_thu")}}
+           **{f: share(r[f]) for f in ("gia_dat", "cong_dat", "gia_thu", "bonus_thu")}}
+    keep = {"so_luong": n - qty, **{f: None if r[f] is None else r[f] - new[f] for f in ("gia_dat", "cong_dat", "gia_thu", "bonus_thu")}}
     with connect() as conn:  # 1 transaction: đơn mới + nhật ký + bớt đơn gốc
         cols = [c for c in table_columns(conn, "orders") if c != "id"]
         new_id = conn.execute(

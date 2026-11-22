@@ -1046,7 +1046,7 @@ function orderCard(o) {
     <div class="tear"></div>
     <div class="money-row">
       <div>Giá đặt<b>${short(o.gia_dat)}</b></div><div>Công<b>${short(o.cong_dat)}</b></div>
-      <div>Shop thu<b>${o.gia_thu ? short(o.gia_thu) : "–"}</b></div>
+      <div>Shop thu<b>${o.gia_thu ? short(o.gia_thu) : "–"}${o.bonus_thu ? `<small class="pos" title="Bonus thu"> +${short(o.bonus_thu)}</small>` : ""}</b></div>
       <div class="lai">Lãi<b class="${o.margin == null ? "" : o.margin >= 0 ? "pos" : "neg"}">${o.margin == null ? "–" : short(o.margin)}</b></div>
     </div>
     ${o.ma_don ? `<div class="track"><span>${vcTag(o.don_vi_vc)} <code class="vc-code" title="Xem hành trình đã lưu (không tra lại hãng)" onclick="event.stopPropagation();savedTrack(${o.id})">${esc(o.ma_don)}</code></span>${o.vc_final ? `<span class="badge ${o.vc_delivered ? "b-done" : "b-cancel"}">${o.vc_delivered ? "✅" : "↩️"} ${esc(o.vc_final)}</span>`
@@ -1094,7 +1094,7 @@ function renderPickbar() {
       ${cell("🛒 Tiền hàng", short(sum(o => o.gia_dat)))}
       ${cell("🛠 Công", short(sum(o => o.cong_dat)))}
       ${cell("💸 Tổng chi", short(sum(chi)))}
-      ${cell(`💰 Shop thu${sold.length < os.length ? ` · ${os.length - sold.length} đơn chưa có giá` : ""}`, short(sum(o => o.gia_thu)))}
+      ${cell(`💰 Shop thu${os.some(o => o.gia_thu && o.bonus_thu) ? " + bonus" : ""}${sold.length < os.length ? ` · ${os.length - sold.length} đơn chưa có giá` : ""}`, short(sum(o => o.thu)))}
       ${cell("📈 Lãi (đơn có giá shop thu)", sold.length ? short(lai) : "–", lai >= 0 ? "pos" : "neg")}
     </div></div>`;
 }
@@ -1246,6 +1246,7 @@ async function orderDetail(id) {
       ${row("Nguồn", [o.nguon_khach, o.nguon_don].filter(Boolean).map(esc).join(" → "))}
       ${row("Giá đặt", money(o.gia_dat))}${row("Công đặt", money(o.cong_dat))}
       ${row("Giá shop thu", o.gia_thu ? money(o.gia_thu) + (o.so_luong > 1 ? ` <span class="meta">(${short(o.gia_thu / o.so_luong)}/cái)</span>` : "") : (o.gia_goi_y ? `<span class="meta">gợi ý ${esc(o.gia_goi_y)}/cái</span>` : ""))}
+      ${row("Bonus thu", o.bonus_thu ? `+${money(o.bonus_thu)}` + (o.gia_thu ? ` <span class="meta">→ tổng thu ${money(o.thu)}</span>` : "") : "")}
       ${row("Lãi", o.margin == null ? "" : `<b class="${o.margin >= 0 ? "pos" : "neg"}">${money(o.margin)}</b>`)}
       ${row("SĐT", esc(o.sdt))}${row("Địa chỉ", esc(o.dia_chi))}
       ${row("Vận chuyển", o.don_vi_vc || o.ma_don ? [o.don_vi_vc ? vcTag(o.don_vi_vc) : "", o.ma_don ? `<code class="vc-code" title="Xem hành trình đã lưu (không tra lại hãng)" onclick="trackOrder(${id},true)">${esc(o.ma_don)}</code>` : ""].filter(Boolean).join(" ") : "")}
@@ -1396,7 +1397,7 @@ function orderForm(id) {
   const o = id ? state.orders[id] : {};
   const m = state.meta, qty = o.so_luong || 1;
   const orig = {...o, gia_dat: o.gia_dat ? short(o.gia_dat) : "", cong_dat: o.cong_dat ? short(o.cong_dat) : "",
-                gia_thu: o.gia_thu ? short(o.gia_thu / qty) : "", so_luong: o.so_luong ?? ""};
+                gia_thu: o.gia_thu ? short(o.gia_thu / qty) : "", bonus_thu: o.bonus_thu ? short(o.bonus_thu) : "", so_luong: o.so_luong ?? ""};
   const fields = [
     ["ten_sp", "Tên sản phẩm", "text", orig.ten_sp, {list: m.products, full: true}],
     ["ten_nguoi_dat", "Người đặt *", "text", orig.ten_nguoi_dat, {list: m.people, hint: true}],
@@ -1406,6 +1407,7 @@ function orderForm(id) {
     ["gia_dat", "Giá đặt", "money", orig.gia_dat, {ph: "vd 4tr3"}],
     ["cong_dat", "Công đặt", "money", orig.cong_dat, {ph: "vd 100k"}],
     ["gia_thu", qty > 1 ? `Giá shop thu 1 cái (× ${qty})` : "Giá shop thu", "money", orig.gia_thu, {qty, ph: o.gia_goi_y ? "gợi ý " + o.gia_goi_y : ""}],
+    ["bonus_thu", "🎉 Bonus thu (cả đơn)", "money", orig.bonus_thu, {ph: "vd 100k – cộng vào tiền lãi"}],
     ["ten_tren_don", "🪪 Tên trên đơn hàng", "text", orig.ten_tren_don, {list: [], ph: "tên ghi trên đơn Shopee/TikTok"}],
     ["chien_dich", "🎁 Chiến dịch thưởng", "select", o.chien_dich ?? "", {options: campaignOptions(o)}],
     ["sdt", "SĐT", "text", orig.sdt, {list: [], full: true, hint: true}],

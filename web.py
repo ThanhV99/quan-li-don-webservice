@@ -386,7 +386,8 @@ def order_out(r, times: dict | None = ...) -> dict:
     d["has_qr"] = bool(r["qr_file_id"])
     d["next_statuses"] = db.next_statuses(r["trang_thai"])  # trạng thái được đổi sang (không nhảy cóc)
     d["qr_v"] = qr_version(r["qr_file_id"])
-    d["margin"] = (r["gia_thu"] or 0) - ((r["gia_dat"] or 0) + (r["cong_dat"] or 0)) if r["gia_thu"] else None
+    d["thu"] = db.order_thu(r)  # giá shop thu + bonus thu
+    d["margin"] = d["thu"] - ((r["gia_dat"] or 0) + (r["cong_dat"] or 0)) if r["gia_thu"] else None
     d["chien_dich_ten"] = db.campaign_name(r["chien_dich"]) if "chien_dich" in r.keys() else None
     d["trackable"] = tracking.is_supported(r["ma_don"], r["don_vi_vc"]) or bool(tracking.web_url(r["ma_don"], r["don_vi_vc"]))
     # GHN bắt captcha (11/2026) → không tra API được, tra qua tiện ích Chrome (nút 🧩 trên web)
