@@ -306,13 +306,18 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); }
 .campaign { border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
 .campaign .scroll { max-height: 300px; overflow: auto; }
 .campaign.off { opacity: .7; }
-body[data-role="user"] :is([onclick^="removeRec"], [onclick^="deleteQr"], [onclick^="deleteProductImage"], .merge-box) { display: none !important; }
+body[data-role="user"] :is([onclick^="removeRec"], [onclick^="deleteQr"], [onclick^="deleteProductImage"], [onclick^="deleteWarehouse"], .merge-box) { display: none !important; }
 #update-bar { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; gap: 10px; align-items: center;
   max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 12px; background: var(--card); border: 1px solid var(--accent);
   box-shadow: 0 6px 24px rgba(0,0,0,.18); font-size: 14px; }
 .lm-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); }
 .lm-post .lm-couriers td, .lm-post .lm-orders td { vertical-align: top; }
 .lm-post table { font-size: 14px; }
+/* sổ địa chỉ kho: dòng địa chỉ dưới tên kho / bưu cục, trong hành trình */
+.wh-addr { padding: 0 14px 6px; font-size: 14px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.wh-addr .muted { font-size: 13px; }
+.timeline .wh { display: block; margin-top: 2px; font-size: 13px; color: var(--teal); }
+.wh-list td { vertical-align: top; }
 .lm-post .lm-couriers, .lm-post .lm-orders { padding: 0 14px; overflow-x: auto; }
 .lm-couriers td:nth-child(2) { white-space: nowrap; }
 .lm-orders summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
@@ -812,7 +817,11 @@ async function start() {
   try { [state.me, state.meta] = await Promise.all([api("/me"), api("/meta")]); } catch { return; }
   $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
   document.body.dataset.role = state.me.role;  // user thường: ẩn nút xóa / gộp (server cũng chặn)
-  readUrl(); syncUrl(true); render();
+  readUrl();
+  // link trong tin Telegram (alert vận chuyển): /don-hang?don=<id>[&tra=1] → mở chi tiết đơn (+ hành trình đã lưu)
+  const qs = new URLSearchParams(location.search), don = +qs.get("don");
+  syncUrl(true); render();
+  if (don) (qs.get("tra") ? savedTrack(don) : orderDetail(don)).catch(() => {});
 }
 const refreshMeta = async () => { state.meta = await api("/meta"); };
 
@@ -1604,7 +1613,8 @@ async function savedTrack(id) {
 }
 async function trackOrder(id, saved = false) {
   $("#extra").innerHTML = `<div class="empty">⏳ ${saved ? "Đang mở hành trình đã lưu…" : "Đang tra hành trình…"}</div>`;
-  let r; try { r = await api(`/orders/${id}/track${saved ? "?saved=1" : ""}`); } catch { $("#extra").innerHTML = ""; return; }
+  let r; try { [r] = await Promise.all([api(`/orders/${id}/track${saved ? "?saved=1" : ""}`), state.warehouses ? null : loadWarehouses()]); }
+  catch { $("#extra").innerHTML = ""; return; }
   const again = r.from_db && r.api_track && !r.final
     ? ` <button class="btn sm" onclick="trackOrder(${id})">🔄 Tra lại từ hãng</button>`
     : r.ghn && !r.final && state.orders?.[id] ? ` <button class="btn sm" onclick="ghnTrack([state.orders[${id}]])" title="GHN bắt captcha: tra trong Chrome bằng tiện ích">🧩 Tra lại qua Chrome</button>` : "";
@@ -1617,7 +1627,10 @@ async function trackOrder(id, saved = false) {
     ${r.error ? `<div class="meta">${esc(r.error)}</div>` : ""}
     ${r.web_url ? `<a class="btn sm" target="_blank" href="${esc(r.web_url)}">Mở trang tra cứu ↗</a>` : ""}
     ${note || again ? `<div class="meta">${note}${again}</div>` : ""}
-    <ul class="timeline">${r.events.map(e => `<li><div class="t">${e.time}${e.location ? " · " + esc(e.location) : ""}</div>${esc(e.text)}</li>`).join("")}</ul>
+    <ul class="timeline">${r.events.map(e => {
+      const w = whFor(`${e.location || ""} ${e.text}`);
+      return `<li><div class="t">${e.time}${e.location ? " · " + esc(e.location) : ""}</div>${esc(e.text)}${w?.dia_chi ? `<span class="wh">📍 ${esc(w.dia_chi)}${w.ghi_chu ? ` · <i>${esc(w.ghi_chu)}</i>` : ""}</span>` : ""}</li>`;
+    }).join("")}</ul>
   </div>`;
 }
 // ?v= đổi theo ảnh → đổi QR là trình duyệt tải ảnh mới, không hiện ảnh cũ đã nhớ
@@ -2514,11 +2527,12 @@ async function viewLastMile() {
   $("#view").innerHTML = `<div class="toolbar">
       <input class="input grow" placeholder="🔍 Tìm bưu cục, nhân viên, SĐT, địa chỉ, mã vận đơn, #đơn…" value="${esc(state.lmQ || "")}"
         oninput="clearTimeout(this._t);this._t=setTimeout(()=>{state.lmQ=this.value;renderLastMile()},250)">
-      <span id="lm-seg" class="seg"></span></div>
+      <span id="lm-seg" class="seg"></span>
+      <button class="btn" onclick="warehouseList()" title="Ghi địa chỉ thật của kho / bưu cục giao (tên đúng như trong hành trình)">🏭 Địa chỉ kho</button></div>
     <div class="meta" style="margin:6px 0 0">Tự tổng hợp từ hành trình đã lưu (mỗi lần bot / web tra hành trình là cập nhật).
       Chỉ J&amp;T ghi tên + SĐT nhân viên giao; SPX, GHN chỉ có tên kho / bưu cục giao cuối.</div>
     <div id="lastmile"><div class="empty">⏳ Đang tải…</div></div>`;
-  state.lastMile = await api("/last-mile");
+  [state.lastMile] = await Promise.all([api("/last-mile"), loadWarehouses()]);
   renderLastMile();
 }
 function renderLastMile() {
@@ -2530,7 +2544,8 @@ function renderLastMile() {
   const itemHit = it => hit(it.ma_don, it.courier, it.latest, ...it.orders.flatMap(o => [o.id, o.ten_nguoi_dat, o.ten_tren_don, o.dia_chi, o.ten_sp]));
   const html = data.filter(c => !state.lmVc || c.carrier === state.lmVc).map(c => {
     const posts = c.posts.map(p => {
-      const postHit = hit(p.post) || p.couriers.some(k => hit(k.name, ...k.phones));
+      const w = whFor(p.post);
+      const postHit = hit(p.post, w?.dia_chi, w?.ghi_chu) || p.couriers.some(k => hit(k.name, ...k.phones));
       const items = postHit ? p.items : p.items.filter(itemHit);
       return items.length ? {...p, shown: items} : null;
     }).filter(Boolean);
@@ -2564,10 +2579,74 @@ function lastMilePost(p) {
         ${p.dang_giao ? `<span>🏍 ${p.dang_giao} đang giao</span>` : ""}${p.returned ? `<span>↩️ ${p.returned} hoàn/hủy</span>` : ""}
         ${p.avg_hours != null ? `<span title="Trung bình từ lúc tới bưu cục / kho giao cuối đến lúc giao xong">⏱ TB ${hrs(p.avg_hours)}</span>` : ""}
         <span>🕒 gần nhất ${dt(p.last)}</span></span></div>
+    ${whLine(p.post)}
     ${couriers}
     <details class="lm-orders"${state.lmQ ? " open" : ""}><summary>🧾 ${p.shown.length} đơn${p.shown.length < p.don ? ` / ${p.don}` : ""}</summary>
       <div class="scroll"><table>${items}</table></div></details>
   </div>`;
+}
+
+// ---------- sổ địa chỉ kho / bưu cục của hãng (tên đúng như trong hành trình → địa chỉ thật) ----------
+async function loadWarehouses() {
+  try { state.warehouses = await api("/warehouses"); } catch { state.warehouses = state.warehouses || []; }
+  return state.warehouses;
+}
+// kho có tên nằm trong chữ (tên kho trong hành trình, mốc hành trình), không phân biệt hoa thường / dấu; tên dài nhất thắng
+function whFor(text) {
+  const t = foldText(text).replace(/\s+/g, " ");
+  let best = null;
+  for (const w of state.warehouses || []) {
+    const k = foldText(w.ten).replace(/\s+/g, " ");
+    if (k && t.includes(k) && (!best || k.length > best.k.length)) best = {k, w};
+  }
+  return best?.w || null;
+}
+function whLine(post) {
+  const w = whFor(post);
+  if (!w) return `<div class="wh-addr"><button class="btn xs" onclick="warehouseForm(0, ${jsq(post)})">＋ Ghi địa chỉ kho này</button></div>`;
+  return `<div class="wh-addr">📍 <b>${esc(w.dia_chi || "chưa ghi địa chỉ")}</b>${w.ghi_chu ? ` <span class="muted">· ${esc(w.ghi_chu)}</span>` : ""}
+    ${w.dia_chi ? `<button class="btn xs" title="Chép địa chỉ" onclick="copyText(${jsq(w.dia_chi)})">📋</button>` : ""}
+    <button class="btn xs" onclick="warehouseForm(${w.id})">✏️</button></div>`;
+}
+// tên kho / bưu cục đã gặp trong hành trình (tab Giao hàng) → gợi ý khi gõ tên
+const whSeen = () => [...new Set((state.lastMile || []).flatMap(c => c.posts.map(p => p.post)))].sort();
+async function warehouseList() {
+  const list = await loadWarehouses();
+  const missing = whSeen().filter(p => !whFor(p));
+  openModal(`${modalHead(`🏭 Địa chỉ kho / bưu cục (${list.length})`)}
+    <div class="meta" style="margin-bottom:8px">Ghi tên <b>đúng như trong hành trình</b> (vd <code>20-HNI Abc 1 Hub</code>, không phân biệt hoa thường / dấu).
+      Mốc hành trình nhắc tới tên đó sẽ hiện kèm địa chỉ.</div>
+    <div class="scroll"><table class="wh-list">${list.map(w => `<tr class="click" onclick="warehouseForm(${w.id})">
+        <td><b>${esc(w.ten)}</b>${w.ghi_chu ? `<div class="muted">${esc(w.ghi_chu)}</div>` : ""}</td>
+        <td>${esc(w.dia_chi || "–")}</td></tr>`).join("") || `<tr><td class="muted">Chưa ghi kho nào</td></tr>`}</table></div>
+    ${missing.length ? `<div class="meta" style="margin-top:10px">Kho đã gặp trong hành trình, chưa có địa chỉ:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${missing.map(p =>
+        `<button class="btn xs" onclick="warehouseForm(0, ${jsq(p)})">＋ ${esc(p)}</button>`).join("")}</div>` : ""}
+    <div class="foot"><button class="btn" onclick="closeModal()">Đóng</button>
+      <button class="btn primary" onclick="warehouseForm(0)">＋ Thêm kho</button></div>`);
+}
+function warehouseForm(id, name) {
+  const w = id ? (state.warehouses || []).find(x => x.id === id) || {} : {ten: name || ""};
+  openModal(`${modalHead(id ? `✏️ Kho ${esc(w.ten)}` : "＋ Thêm địa chỉ kho")}
+    <div class="form">
+      ${field(["ten", "Tên kho / bưu cục (đúng như trong hành trình)", "text", w.ten || "", {full: true, list: whSeen(), ph: "vd 20-HNI Abc 1 Hub"}])}
+      ${field(["dia_chi", "Địa chỉ", "textarea", w.dia_chi || "", {full: true, ph: "Số nhà, đường, phường, quận…"}])}
+      ${field(["ghi_chu", "Ghi chú", "text", w.ghi_chu || "", {full: true, ph: "giờ mở cửa, SĐT bưu cục, cách tới…"}])}
+    </div>
+    <div class="foot">${id ? `<button class="btn bad left" onclick="deleteWarehouse(${id})">🗑 Xóa</button>` : ""}
+      <button class="btn" onclick="closeModal()">Hủy</button><button class="btn primary" onclick="saveWarehouse(${id || 0})">Lưu</button></div>`);
+}
+async function saveWarehouse(id) {
+  const b = formData();
+  if (!b.ten.trim()) { toast("Thiếu tên kho", true); return; }
+  if (id) await patch(`/warehouses/${id}`, b); else await post("/warehouses", b);
+  toast("✏️ Đã lưu địa chỉ kho"); closeModal(); await loadWarehouses();
+  if (state.tab === "lastmile" && $("#lastmile")) renderLastMile();
+}
+async function deleteWarehouse(id) {
+  if (!confirm("Xóa địa chỉ kho này?")) return;
+  await del(`/warehouses/${id}`); toast("🗑 Đã xóa"); closeModal(); await loadWarehouses();
+  if (state.tab === "lastmile" && $("#lastmile")) renderLastMile();
 }
 
 // ---------- sổ địa chỉ đặt hàng (bot /diachi) ----------

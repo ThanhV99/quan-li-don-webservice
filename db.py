@@ -365,6 +365,17 @@ CREATE TABLE IF NOT EXISTS image_files (
     created_at  TEXT NOT NULL           -- lúc lưu (prune_images giữ ảnh chưa ai dùng ít nhất IMAGE_KEEP_DAYS)
 );
 
+-- sổ địa chỉ kho / bưu cục của hãng vận chuyển (web tab 🏍 Giao hàng): tên đúng như trong hành trình
+-- (vd "20-HNI Abc 1 Hub") → địa chỉ thật + ghi chú; hành trình có mốc nhắc tới tên kho thì hiện kèm địa chỉ
+CREATE TABLE IF NOT EXISTS warehouses (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ten         TEXT NOT NULL,
+    ten_key     TEXT NOT NULL UNIQUE,      -- name_key(ten): không trùng tên (hoa / thường, khoảng trắng)
+    dia_chi     TEXT,
+    ghi_chu     TEXT,
+    updated_at  TEXT NOT NULL
+);
+
 -- sổ địa chỉ đặt hàng (bot /diachi, web tab 📍 Địa chỉ): mỗi dòng 1 ô văn bản tự do
 CREATE TABLE IF NOT EXISTS addresses (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -946,6 +957,27 @@ def _take_slot(conn, key: str, gap: float) -> float:
     conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) "
                  "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, f"{slot:.3f}"))
     return slot - now
+
+
+def take_lease(key: str, seconds: float) -> str | None:
+    """Giữ quyền chạy 1 việc (vd 1 lượt kiểm tra vận chuyển) trong `seconds` giây, dùng chung mọi tiến trình / máy
+    (cron Vercel, bot gọi /kiemtravc, vòng lặp web Docker) qua bảng meta: 1 câu lệnh nguyên tử. Trả về mã giữ chỗ
+    (đưa cho release_lease) hoặc None khi đang có nơi khác giữ và chưa hết hạn. Giá trị = '<hạn epoch 12 số>|<mã>'
+    → so chuỗi = so giờ."""
+    now = int(time.time())
+    token = secrets.token_hex(6)
+    value = f"{now + int(seconds):012d}|{token}"
+    with connect() as conn:
+        row = conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE "
+                           "SET value = excluded.value WHERE meta.value < ? RETURNING key",
+                           (key, value, f"{now:012d}")).fetchone()
+    return value if row else None
+
+
+def release_lease(key: str, lease: str | None):
+    if lease:
+        with connect() as conn:
+            conn.execute("UPDATE meta SET value = '0' WHERE key = ? AND value = ?", (key, lease))
 
 
 def set_qr(order_id: int, file_id: str | None) -> bool:
@@ -1610,6 +1642,38 @@ def add_address(text: str, user_id: int | None = None) -> int:
     if not text:
         raise ValueError("Địa chỉ trống")
     return insert("addresses", {"noi_dung": text}, user_id)
+
+
+# ---------- sổ địa chỉ kho / bưu cục của hãng ----------
+
+def list_warehouses():
+    with connect() as conn:
+        return conn.execute("SELECT * FROM warehouses ORDER BY ten").fetchall()
+
+
+def save_warehouse(wid: int | None, ten: str, dia_chi: str = "", ghi_chu: str = "") -> int:
+    """Thêm (wid None) hoặc sửa 1 kho. Tên trùng kho khác (không phân biệt hoa thường) → ValueError."""
+    ten = " ".join((ten or "").split())
+    if not ten:
+        raise ValueError("Thiếu tên kho / bưu cục (ghi đúng như trong hành trình)")
+    key = name_key(ten)
+    dia_chi, ghi_chu = (dia_chi or "").strip() or None, (ghi_chu or "").strip() or None
+    with connect() as conn:
+        other = conn.execute("SELECT id FROM warehouses WHERE ten_key = ?", (key,)).fetchone()
+        if other and other["id"] != wid:
+            raise ValueError(f"Đã có kho “{ten}” (#{other['id']})")
+        if wid is None:
+            return conn.execute("INSERT INTO warehouses (ten, ten_key, dia_chi, ghi_chu, updated_at) VALUES (?, ?, ?, ?, ?) "
+                                "RETURNING id", (ten, key, dia_chi, ghi_chu, _now())).fetchone()[0]
+        if not conn.execute("UPDATE warehouses SET ten = ?, ten_key = ?, dia_chi = ?, ghi_chu = ?, updated_at = ? WHERE id = ?",
+                            (ten, key, dia_chi, ghi_chu, _now(), wid)).rowcount:
+            raise LookupError("Không tìm thấy kho")
+        return wid
+
+
+def delete_warehouse(wid: int) -> bool:
+    with connect() as conn:
+        return conn.execute("DELETE FROM warehouses WHERE id = ?", (wid,)).rowcount > 0
 
 
 # ---------- sản phẩm ----------

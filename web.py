@@ -26,6 +26,8 @@ import db
 import net
 import rpc
 import sale_text
+import shipwatch
+import track_text
 import tracking
 import utils
 from utils import (addr_groups, money, money_short, parse_money, parse_pct, parse_range, pct_text, price_after_discount, range_short,
@@ -46,7 +48,8 @@ MERGE_PATH = re.compile(r"/api/people/\d+/merge")
 SERVICE_TOKEN = os.getenv("SERVICE_TOKEN", "")
 SVC_PREFIX = "/api/svc/"
 SVC_INFO = "__info__"  # <module>.__info__ → hằng số + tên hàm (+ hàm async / hàm thuần) cho bot
-SVC_MODULES = {"db": db, "tracking": tracking, "sale_text": sale_text, "utils": utils, "alert_rules": alert_rules}
+SVC_MODULES = {"db": db, "tracking": tracking, "sale_text": sale_text, "utils": utils, "alert_rules": alert_rules,
+               "shipwatch": shipwatch}  # shipwatch: bot gọi run_pass / delivering_messages (/kiemtravc, /danggiao)
 # db: chỉ những hàm bot.py dùng (không có tài khoản web, phiên đăng nhập, connect)
 SVC_DB_FUNCS = frozenset("""
 add_address add_carrier add_phone add_product add_product_image all_rows bot_heartbeat_age campaign_choices
@@ -77,7 +80,8 @@ SVC_PURE_DB = {"name_key", "norm_phone"}
 # module thuần bot TẢI MÃ NGUỒN về chạy tại chỗ (đỡ hàng trăm lượt gọi money() … qua mạng khi web ở Render): code chỉ
 # nằm ở web; hằng số (kể cả lấy từ .env của web: VC_*, ADDR_ALIASES) bot ghi đè bằng giá trị bên web (__info__);
 # hàm không thuần (database, gọi hãng, giờ hiện tại) vẫn gọi API. Thứ tự = thứ tự bot nạp (theo import).
-SVC_SOURCE_MODULES = {"utils": utils, "alert_rules": alert_rules, "net": net, "sale_text": sale_text, "tracking": tracking}
+SVC_SOURCE_MODULES = {"utils": utils, "alert_rules": alert_rules, "net": net, "sale_text": sale_text, "tracking": tracking,
+                      "track_text": track_text}
 SVC_SOURCE = "__source__"
 SVC_CODE_VERSION = hashlib.sha256(b"".join(Path(m.__file__).read_bytes() for m in SVC_SOURCE_MODULES.values())).hexdigest()[:16]
 rpc.register(tracking.TrackResult, tracking.TrackEvent)
@@ -97,6 +101,8 @@ SVC_FUNCS = {mod: _svc_funcs(mod) for mod in SVC_MODULES}
 def _svc_info(mod: str) -> dict:
     consts = {}
     for name, val in vars(SVC_MODULES[mod]).items():
+        if mod == "shipwatch":  # có token bot (BOT_TOKEN / ALERT_BOT_TOKEN): không gửi hằng số nào
+            break
         if name.isupper() and not name.startswith("_"):
             try:
                 rpc.encode(val)
@@ -104,7 +110,7 @@ def _svc_info(mod: str) -> dict:
                 continue
             consts[name] = val
     funcs = SVC_FUNCS[mod]
-    pure = (SVC_PURE_DB if mod == "db" else
+    pure = (SVC_PURE_DB if mod == "db" else set() if mod == "shipwatch" else  # shipwatch: mọi hàm đọc database
             {n for n, f in funcs.items() if not inspect.iscoroutinefunction(f)} - SVC_IMPURE.get(mod, set()))
     local = {n: f.__module__ for n, f in funcs.items() if n in pure and f.__module__ in SVC_SOURCE_MODULES and mod == "db"}
     return {"consts": consts, "funcs": sorted(funcs), "pure": sorted(pure), "local": local, "code_version": SVC_CODE_VERSION,
@@ -131,6 +137,10 @@ async def auth(request: Request, call_next):
         if not SERVICE_TOKEN or not hmac.compare_digest(token.encode(), SERVICE_TOKEN.encode()):
             return JSONResponse({"detail": "Sai token dịch vụ"}, status_code=401)
         return await call_next(request)
+    if path.startswith(CRON_PREFIX):  # cron ngoài (GitHub Actions / cron-job.org / Vercel Cron): token, không cookie
+        if not cron_token_ok(request):
+            return JSONResponse({"detail": "Sai token"}, status_code=401)
+        return await call_next(request)
     if path.startswith("/api/") and path not in PUBLIC_API:
         user = db.session_user(request.cookies.get(COOKIE))
         if not user:
@@ -151,6 +161,25 @@ async def auth(request: Request, call_next):
         except OSError as e:
             log.warning("Không đồng bộ được thư mục ảnh QR: %s", e)
     return resp
+
+
+CRON_PREFIX = "/api/cron/"
+
+
+def cron_token_ok(request: Request) -> bool:
+    """X-Service-Token = SERVICE_TOKEN, hoặc Authorization: Bearer <SERVICE_TOKEN | CRON_SECRET> (Vercel Cron tự gửi
+    Bearer CRON_SECRET khi đặt biến đó)."""
+    auth_h = request.headers.get("Authorization", "")
+    sent = [request.headers.get("X-Service-Token", ""), auth_h[7:] if auth_h.lower().startswith("bearer ") else ""]
+    keys = [k for k in (SERVICE_TOKEN, os.getenv("CRON_SECRET", "")) if k]
+    return any(s and hmac.compare_digest(s.encode(), k.encode()) for s in sent for k in keys)
+
+
+@app.api_route(CRON_PREFIX + "shipments", methods=["GET", "POST"])
+async def cron_shipments(budget: float = 50):
+    """1 lượt kiểm tra vận chuyển (shipwatch.run_pass) trong tối đa `budget` giây (mặc định 50, trần 280) – cron ngoài
+    gọi mỗi 5–10 phút khi web chạy trên Vercel. Đang có lượt khác chạy → busy, bỏ qua."""
+    return await shipwatch.run_pass(budget=max(10.0, min(budget, 280.0)))
 
 
 @app.post(SVC_PREFIX + "{target}")
@@ -780,6 +809,37 @@ def campaign_out(c) -> dict:
     return {**dict(c), **db.campaign_stats(c), "thuong_label": money_short(c["thuong"])}
 
 
+# sổ địa chỉ kho / bưu cục của hãng (tab 🏍 Giao hàng); đăng ký trước /api/{table}/{rec_id} chung
+@app.get("/api/warehouses")
+def warehouses():
+    return [dict(r) for r in db.list_warehouses()]
+
+
+async def _warehouse_body(request: Request) -> tuple[str, str, str]:
+    b = await request.json()
+    return str(b.get("ten") or ""), str(b.get("dia_chi") or ""), str(b.get("ghi_chu") or "")
+
+
+@app.post("/api/warehouses")
+async def create_warehouse(request: Request):
+    return {"id": db.save_warehouse(None, *await _warehouse_body(request))}
+
+
+@app.patch("/api/warehouses/{wid}")
+async def update_warehouse(wid: int, request: Request):
+    try:
+        return {"id": db.save_warehouse(wid, *await _warehouse_body(request))}
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.delete("/api/warehouses/{wid}")
+def delete_warehouse(wid: int):
+    if not db.delete_warehouse(wid):
+        raise HTTPException(404, "Không tìm thấy kho")
+    return {"ok": True}
+
+
 @app.get("/api/campaigns")
 def campaigns():
     return [campaign_out(c) for c in db.list_campaigns()]
@@ -1012,6 +1072,9 @@ async def start_prefetch():
     if os.getenv("VERCEL"):
         return
     asyncio.create_task(prefetch_qr_loop())
+    if shipwatch.enabled():  # SHIPMENT_WATCH=1: web Docker tự kiểm tra vận chuyển + gửi alert (thay vòng lặp cũ của bot)
+        log.info("Bật tự kiểm tra vận chuyển (SHIPMENT_WATCH)")
+        asyncio.create_task(shipwatch.watch_loop())
 
 
 QR_TABLES = {"order": "orders", "person": "nguoi_dat"}

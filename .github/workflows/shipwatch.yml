@@ -1,0 +1,36 @@
+# Tự kiểm tra hành trình đơn Đã đặt + gửi alert Telegram (web/shipwatch.py) khi web chạy trên Vercel (không chạy nền được).
+# Cần trong Settings của repo:
+#   Secrets  → SERVICE_TOKEN  (giống SERVICE_TOKEN của web)
+#   Variables → WEB_URL       (vd https://<tên>.vercel.app, không có / cuối)
+# Thiếu 1 trong 2 → bỏ qua (không báo lỗi). GitHub có thể chạy trễ vài phút so với lịch; repo không có commit
+# 60 ngày thì GitHub tự tắt lịch (bật lại trong tab Actions).
+name: shipwatch
+
+# Lịch (giờ UTC, Việt Nam = UTC+7): 30 phút/lần từ 6:00 tới 21:00 giờ Việt Nam; đêm không gọi. Đơn tới hạn trong
+# đêm được tra dồn ở lượt 6:00 (mỗi lượt tối đa 120 giây, đơn chưa kịp tra để lượt 6:30). Đổi khung giờ: sửa 3 dòng cron.
+on:
+  schedule:
+    - cron: "*/30 23 * * *"     # 6:00, 6:30 giờ Việt Nam (23h UTC hôm trước)
+    - cron: "*/30 0-13 * * *"   # 7:00 → 20:30 giờ Việt Nam
+    - cron: "0 14 * * *"        # 21:00 giờ Việt Nam
+  workflow_dispatch:
+
+concurrency:
+  group: shipwatch
+  cancel-in-progress: false
+
+jobs:
+  pass:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Gọi 1 lượt kiểm tra vận chuyển
+        env:
+          TOKEN: ${{ secrets.SERVICE_TOKEN }}
+          WEB_URL: ${{ vars.WEB_URL }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$WEB_URL" ]; then
+            echo "Chưa đặt secret SERVICE_TOKEN / variable WEB_URL – bỏ qua"; exit 0
+          fi
+          curl -fsS -m 150 -X POST -H "Authorization: Bearer $TOKEN" "$WEB_URL/api/cron/shipments?budget=120"
+          echo
