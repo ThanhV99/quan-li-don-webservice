@@ -144,7 +144,8 @@ async def auth(request: Request, call_next):
         db.ACTOR.set(user["username"])  # nhật ký đổi trạng thái đơn ghi tài khoản web đã đổi
     resp = await call_next(request)
     resp.headers["X-App-Version"] = APP_VERSION
-    if request.method != "GET" and resp.status_code < 400 and path.startswith("/api/"):
+    # Vercel: bỏ thư mục ảnh QR theo tên (đĩa tạm, không ai xem) cho đỡ 1 lần đọc database mỗi lệnh ghi
+    if request.method != "GET" and resp.status_code < 400 and path.startswith("/api/") and not os.getenv("VERCEL"):
         try:  # đổi QR / tên / gộp / xóa người đặt → cập nhật thư mục ảnh QR theo tên
             db.sync_qr_images()
         except OSError as e:
@@ -1007,6 +1008,9 @@ async def prefetch_qr_loop():
 
 @app.on_event("startup")
 async def start_prefetch():
+    # Vercel (serverless, tự đặt VERCEL=1) không chạy nền liên tục: bỏ vòng lặp, ảnh vẫn tải khi có người xem
+    if os.getenv("VERCEL"):
+        return
     asyncio.create_task(prefetch_qr_loop())
 
 

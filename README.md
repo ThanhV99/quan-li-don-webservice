@@ -35,6 +35,14 @@ Web Service · Runtime Docker · repo này · Region Singapore · Health check `
 `FILES_DIR=/tmp/quanlidon` (đĩa không giữ lâu; ảnh đã nằm trong database).
 Cổng lấy từ `PORT` của Render.
 
+### Chạy trên Vercel (Postgres trên Supabase)
+
+Import repo vào Vercel (preset FastAPI, không cần build command): điểm vào `app.py` (= `web:app`), thư viện theo
+`requirements.txt` (tạo lại bằng `pipenv requirements > requirements.txt` khi đổi Pipfile), Python theo `.python-version`.
+Environment: `DATABASE_URL` = chuỗi **Transaction pooler** của Supabase (cổng 6543), `TZ=Asia/Ho_Chi_Minh`,
+`FORWARDED_ALLOW_IPS=*`, `BOT_TOKEN`, `ALLOWED_USER_IDS`, các `VC_*` / `ADDR_ALIASES` (không cần `PROXY_URL`, `PG_*`).
+Vercel tự đặt `VERCEL=1` → web bỏ vòng lặp ảnh chạy nền và thư mục ảnh QR theo tên, `FILES_DIR` mặc định `/tmp/quan-li-don`.
+
 Chạy trực tiếp (phát triển, cần 1 Postgres): `pipenv install && DATABASE_URL=postgresql://… pipenv run uvicorn web:app --port 8088`.
 
 ## API

@@ -20,7 +20,9 @@ log = logging.getLogger("db")
 
 # thư mục file của web: bản chép ảnh QR theo tên người đặt (cho dễ xem trên máy). Bản gốc mọi ảnh nằm trong
 # database (bảng image_files). Docker: /app/data (volume ./data); chạy tại chỗ: web/data; Vercel: /tmp/….
-FILES_DIR = os.getenv("FILES_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
+# Vercel (VERCEL=1): đĩa chỉ đọc, chỉ ghi được /tmp
+FILES_DIR = os.getenv("FILES_DIR") or ("/tmp/quan-li-don" if os.getenv("VERCEL") else
+                                       os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 # trước 11/2026 ảnh tải về nằm ở đĩa (data/qr_cache, tên = băm file_id): chỉ còn đọc để chép vào database
 LEGACY_CACHE_DIR = os.path.join(FILES_DIR, "qr_cache")
 
