@@ -33,14 +33,20 @@ a { color: var(--accent); text-decoration: none; }
 button, input, select, textarea { font: inherit; color: inherit; }
 .hidden { display: none !important; }
 
-header { position: sticky; top: 0; z-index: 10; background: var(--card); border-bottom: 1px solid var(--line); }
+header { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--card) 86%, transparent); backdrop-filter: saturate(1.4) blur(10px); -webkit-backdrop-filter: saturate(1.4) blur(10px); }
 .bar { max-width: 1180px; margin: 0 auto; display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
-.brand { font-weight: 700; font-size: 17px; white-space: nowrap; }
+.brand { font-weight: 800; font-size: 15px; white-space: nowrap; color: var(--accent); display: inline-flex; align-items: center; gap: 6px;
+  border: 2px solid currentColor; outline: 1px solid currentColor; outline-offset: 2px; border-radius: 6px; padding: 1px 8px;
+  transform: rotate(-3deg); margin: 0 4px; }
 nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; flex: 1; }
 nav::-webkit-scrollbar { display: none; }
+/* tab cuối bị cắt khi hết chỗ → mờ dần ở mép phải thay vì cắt ngang chữ */
+nav { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); padding-right: 24px; }
 nav a { border: 0; background: none; padding: 8px 12px; border-radius: 10px; cursor: pointer;
   color: var(--muted); white-space: nowrap; font-weight: 500; text-decoration: none; }
-nav a.on { background: var(--accent-soft); color: var(--accent); }
+nav a:hover { color: var(--text); background: var(--bg); }
+nav a.on { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
 main { max-width: 1180px; margin: 0 auto; padding: 16px 16px 80px; }
 
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
@@ -71,6 +77,9 @@ tr.sku-on td { background: var(--ok-soft); font-weight: 600; }
 .btn { border: 1px solid var(--line); background: var(--card); padding: 8px 14px; border-radius: 10px;
   cursor: pointer; font-weight: 500; white-space: nowrap; }
 .btn:hover { border-color: var(--accent); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled:not(.busy) { opacity: .55; cursor: not-allowed; }
+.btn.primary:hover { filter: brightness(1.08); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
 .btn.bad { color: var(--bad); }
@@ -368,12 +377,75 @@ body[data-role="user"] :is([onclick^="removeRec"], [onclick^="deleteQr"], [oncli
 .timeline .t { color: var(--muted); font-size: 12px; }
 .qr { max-width: 100%; border-radius: 12px; display: block; margin: 10px auto; }
 
-#toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 99; background: var(--text); color: var(--bg);
-  padding: 10px 18px; border-radius: 12px; font-weight: 500; box-shadow: 0 6px 20px rgba(0,0,0,.2); transition: opacity .2s; max-width: 90vw; }
-#toast.err { background: var(--bad); color: #fff; }
+/* thông báo: xếp chồng dưới đáy, sọc trái theo loại (giống sọc thẻ đơn) – xanh = xong, đỏ = lỗi, tím = tin thường */
+#toasts { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 1100; display: flex; flex-direction: column;
+  align-items: center; gap: 8px; width: max-content; max-width: calc(100vw - 32px); pointer-events: none; }
+body:has(#pickbar:not(:empty)) #toasts { bottom: 200px; }
+.toast { pointer-events: auto; display: flex; align-items: flex-start; gap: 10px; max-width: 520px; padding: 11px 10px 11px 14px;
+  border-radius: 12px; background: var(--card); color: var(--text); border: 1px solid var(--line); font-weight: 500; font-size: 14.5px;
+  box-shadow: inset 5px 0 0 var(--t, var(--accent)), 0 10px 30px rgba(10,12,20,.18); animation: toast-in .22s ease-out; }
+.toast.t-ok { --t: var(--ok); }
+.toast.t-err { --t: var(--bad); background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.toast .t-msg { flex: 1; padding-top: 1px; overflow-wrap: anywhere; }
+.toast .t-x { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1.5; border-radius: 6px; }
+.toast .t-x:hover { color: var(--text); background: var(--bg); }
+.toast.out { animation: toast-out .18s ease-in forwards; }
+@keyframes toast-in { from { transform: translateY(12px); opacity: 0; } }
+@keyframes toast-out { to { transform: translateY(8px); opacity: 0; } }
+
+/* đang tải: vạch mực chạy trên cùng (mọi lệnh gọi máy chủ), nút đang chờ hiện vòng quay, tab mới hiện khung xám */
+#loadbar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 1200; pointer-events: none; overflow: hidden;
+  opacity: 0; transition: opacity .2s; }
+#loadbar.on { opacity: 1; }
+#loadbar::before { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; border-radius: 99px;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--accent)); animation: loadbar 1.1s ease-in-out infinite; }
+@keyframes loadbar { from { left: -40%; } to { left: 100%; } }
+.btn.busy { position: relative; color: transparent !important; pointer-events: none; }
+.btn.busy::after { content: ""; position: absolute; left: 50%; top: 50%; width: 15px; height: 15px; margin: -9.5px 0 0 -9.5px;
+  border: 2px solid var(--spin, var(--text)); border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+.btn.primary, .btn.ok { --spin: var(--on-accent); }
+.btn.ok { --spin: #fff; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.skel { display: grid; gap: 12px; }
+.skel .row { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+.skel i, .skel-card { --sk: color-mix(in srgb, var(--line) 60%, var(--card)); display: block; width: 100%; height: 120px;
+  border-radius: var(--radius); background: linear-gradient(100deg, var(--sk) 30%, var(--card) 50%, var(--sk) 70%) 0 0 / 300% 100%;
+  animation: shimmer 1.4s linear infinite; }
+.skel i.bar { height: 40px; max-width: 520px; border-radius: 10px; justify-self: start; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.view-err { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+@media (prefers-reduced-motion: reduce) {
+  #loadbar::before, .skel i, .skel-card, .toast, .toast.out { animation: none; }
+  #loadbar.on::before { left: 0; width: 100%; opacity: .6; }
+  .btn.busy::after { animation-duration: 2s; }
+}
 .empty { text-align: center; color: var(--muted); padding: 40px 10px; }
-.login { max-width: 340px; margin: 14vh auto; text-align: center; }
-.login .card { padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+/* đăng nhập = phiếu gửi hàng: con dấu tên app, đường xé răng cưa, phần điền thông tin bên dưới */
+.login { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px;
+  background: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--muted) 22%, transparent) 1px, transparent 0) 0 0 / 18px 18px, var(--bg); }
+.login-wrap { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 12px; }
+.login-card { padding: 26px 24px 24px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 18px 50px rgba(10,12,20,.12); }
+.login-card.nudge { animation: nudge .3s ease-in-out; }
+.login-head { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.login-stamp { font-size: 22px; font-weight: 850; letter-spacing: -.3px; color: var(--accent); padding: 4px 12px;
+  border: 3px solid currentColor; outline: 1.5px solid currentColor; outline-offset: 3px; border-radius: 8px; transform: rotate(-4deg);
+  margin: 6px 0 4px 4px; }
+.login-head p { margin: 0; color: var(--muted); font-size: 14px; }
+.login-card .tear { margin: 4px -25px; }
+.login-card label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.login-card .input { padding: 11px 12px; font-size: 16px; }
+.login-card .input.invalid { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+.pw-wrap { position: relative; display: flex; }
+.pw-wrap .input { padding-right: 76px; }
+.pw-eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: none; cursor: pointer;
+  color: var(--muted); font-size: 13px; font-weight: 600; padding: 5px 8px; border-radius: 7px; }
+.pw-eye:hover { background: var(--bg); color: var(--text); }
+.login-err { display: flex; gap: 8px; align-items: flex-start; padding: 9px 12px; border-radius: 10px; font-size: 14px; font-weight: 500;
+  background: var(--bad-soft); color: var(--bad); box-shadow: inset 4px 0 0 var(--bad); }
+.btn.big { padding: 12px 16px; font-size: 16px; font-weight: 700; border-radius: 11px; }
+.login-foot { text-align: center; font-size: 12px; color: var(--muted); }
+#setup-hint { font-size: 14px; }
+#setup-hint code { display: block; margin-top: 8px; padding: 8px; background: var(--bg); border-radius: 8px; word-break: break-all; }
 .fab { position: fixed; right: 18px; bottom: 18px; z-index: 20; border-radius: 99px; padding: 12px 18px; box-shadow: 0 6px 18px rgba(91,60,196,.35); }
 @media (max-width: 520px) {
   .cards, #orders.cards { grid-template-columns: 1fr; }
@@ -386,16 +458,30 @@ body[data-role="user"] :is([onclick^="removeRec"], [onclick^="deleteQr"], [oncli
 </head>
 <body>
 <div id="login" class="login hidden">
-  <div style="font-size:44px">📦</div>
-  <h2>Quản lí đơn</h2>
-  <form class="card" onsubmit="doLogin(event)">
-    <input class="input" id="un" placeholder="Tên đăng nhập" autocomplete="username" autocapitalize="none" autofocus>
-    <input class="input" type="password" id="pw" placeholder="Mật khẩu" autocomplete="current-password">
-    <button class="btn primary">Đăng nhập</button>
-  </form>
-  <div id="setup-hint" class="card hidden" style="margin-top:12px;text-align:left;font-size:14px">
-    Chưa có tài khoản nào. Tạo admin trên máy chạy bot:<br>
-    <code style="display:block;margin-top:8px;padding:8px;background:var(--bg);border-radius:8px;word-break:break-all">docker compose exec web python manage.py createadmin &lt;tên&gt;</code>
+  <div class="login-wrap">
+    <form class="card login-card" id="login-form" onsubmit="doLogin(event)" novalidate>
+      <div class="login-head">
+        <span class="login-stamp">📦 Quản lí đơn</span>
+        <p>Đăng nhập để xem và ghi đơn hàng.</p>
+      </div>
+      <div class="tear"></div>
+      <label>Tên đăng nhập
+        <input class="input" id="un" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus
+          oninput="loginError('')">
+      </label>
+      <label>Mật khẩu
+        <span class="pw-wrap">
+          <input class="input" type="password" id="pw" autocomplete="current-password" oninput="loginError('')">
+          <button type="button" class="pw-eye" id="pw-eye" onclick="togglePw()" aria-label="Hiện mật khẩu">Hiện</button>
+        </span>
+      </label>
+      <div id="login-err" class="login-err hidden" role="alert"></div>
+      <button class="btn primary big" id="login-btn">Đăng nhập</button>
+    </form>
+    <div id="setup-hint" class="card hidden">
+      Chưa có tài khoản nào. Tạo tài khoản admin trên máy chạy web:
+      <code>docker compose exec web python manage.py createadmin &lt;tên&gt;</code>
+    </div>
   </div>
 </div>
 
@@ -407,7 +493,8 @@ body[data-role="user"] :is([onclick^="removeRec"], [onclick^="deleteQr"], [oncli
   </div></header>
   <main id="view"></main>
 </div>
-<div id="toast" class="hidden"></div>
+<div id="toasts" aria-live="polite"></div>
+<div id="loadbar" aria-hidden="true"></div>
 <div id="modal-root"></div>
 
 <script>
@@ -437,11 +524,59 @@ const payable = o => o.trang_thai === "Đã nhận";
 const stamp = st => `<span class="stamp ${(STATUS[st] || [])[1] || "b-muted"}">${(STATUS[st] || [""])[0]} ${esc(st)}</span>`;
 const badge = st => `<span class="badge ${(STATUS[st] || [])[1] || "b-muted"}">${(STATUS[st] || [""])[0]} ${esc(st)}</span>`;
 
-function toast(msg, err) {
-  const t = $("#toast");
-  t.textContent = msg; t.className = err ? "err" : "";
-  clearTimeout(toast.t); toast.t = setTimeout(() => t.className = "hidden", 2600);
+// toast(msg, true | "err") = lỗi (đỏ, 6 s), "ok" = xong (xanh), bỏ trống = tin thường; tin "Đã …" / "✅ …" tự thành "ok".
+// Tối đa 3 tin cùng lúc; cùng nội dung thì chỉ gia hạn tin cũ.
+function toast(msg, kind) {
+  kind = kind === true ? "err" : kind || (/^(✅|💾|🗑|🔑|Đã )/.test(String(msg)) ? "ok" : "info");
+  const box = $("#toasts");
+  let t = [...box.children].find(el => !el.classList.contains("out") && el.dataset.msg === String(msg));
+  if (!t) {
+    t = document.createElement("div");
+    t.dataset.msg = msg;
+    t.setAttribute("role", kind === "err" ? "alert" : "status");
+    t.innerHTML = `<span class="t-msg"></span><button class="t-x" aria-label="Đóng thông báo">✕</button>`;
+    t.querySelector(".t-msg").textContent = msg;
+    t.querySelector(".t-x").onclick = () => hideToast(t);
+    box.appendChild(t);
+    const live = [...box.children].filter(el => !el.classList.contains("out"));
+    if (live.length > 3) hideToast(live[0]);
+  }
+  t.className = "toast t-" + kind;
+  clearTimeout(t._t); t._t = setTimeout(() => hideToast(t), kind === "err" ? 6000 : 3000);
 }
+function hideToast(t) {
+  clearTimeout(t._t); t.classList.add("out");
+  setTimeout(() => t.remove(), matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 180);
+}
+
+// ---------- đang tải ----------
+// vạch chạy trên cùng khi còn lệnh gọi máy chủ (hiện sau 120 ms để lệnh nhanh không nháy);
+// nút vừa bấm (≤ 1,5 s trước khi gọi) hiện vòng quay + không bấm lại được tới khi xong
+let pending = 0, lastBtn = null;
+function loading(delta) {
+  pending = Math.max(0, pending + delta);
+  clearTimeout(loading.t);
+  if (pending) loading.t = setTimeout(() => $("#loadbar").classList.add("on"), 120);
+  else $("#loadbar").classList.remove("on");
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest?.(".btn"); if (b) lastBtn = {el: b, t: performance.now()};
+}, true);
+document.addEventListener("submit", e => {
+  const b = e.submitter?.closest(".btn"); if (b) lastBtn = {el: b, t: performance.now()};
+}, true);
+function busyButton() {
+  const b = lastBtn && performance.now() - lastBtn.t < 1500 && lastBtn.el.isConnected ? lastBtn.el : null;
+  if (!b) return () => {};
+  b.dataset.busy = (+b.dataset.busy || 0) + 1; b.classList.add("busy"); b.setAttribute("aria-busy", "true");
+  return () => {
+    b.dataset.busy = Math.max(0, (+b.dataset.busy || 1) - 1);
+    if (!+b.dataset.busy) { b.classList.remove("busy"); b.removeAttribute("aria-busy"); }
+  };
+}
+const skelCards = (n = 3) => '<i class="skel-card" aria-hidden="true"></i>'.repeat(n);
+const skeleton = () => `<div class="skel" aria-busy="true" aria-label="Đang tải"><i class="bar"></i>
+  <div class="row"><i></i><i></i><i></i></div><div class="row"><i></i><i></i></div></div>`;
 
 // server được cập nhật trong lúc trang đang mở → trang vẫn chạy code cũ: hiện thanh báo tải lại
 const APP_VERSION = "__APP_VERSION__";
@@ -450,15 +585,34 @@ function checkVersion(v) {
   document.body.insertAdjacentHTML("beforeend", `<div id="update-bar">🔄 Web vừa được cập nhật bản mới.
     <button class="btn sm primary" onclick="location.reload()">Tải lại trang</button></div>`);
 }
+// opts.quiet = không tự hiện toast lỗi (nơi gọi tự báo, vd form đăng nhập)
 async function api(path, opts = {}) {
   const init = {method: opts.method || "GET", headers: {}};
   if (opts.body !== undefined) { init.body = JSON.stringify(opts.body); init.headers["Content-Type"] = "application/json"; }
-  const res = await fetch("/api" + path, init);
-  checkVersion(res.headers.get("X-App-Version"));
-  if (res.status === 401 && !["/login", "/me/password"].includes(path)) { showLogin(); throw new Error("Chưa đăng nhập"); }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) { const m = typeof data.detail === "string" ? data.detail : "Lỗi " + res.status; toast(m, true); throw new Error(m); }
-  return data;
+  const unbusy = init.method === "GET" ? () => {} : busyButton();
+  loading(1);
+  try {
+    let res;
+    try { res = await fetch("/api" + path, init); }
+    catch {
+      const m = "Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.";
+      if (!opts.quiet) toast(m, true);
+      throw new Error(m);
+    }
+    checkVersion(res.headers.get("X-App-Version"));
+    if (res.status === 401 && !["/login", "/me/password"].includes(path)) {
+      if (state.me) toast("Phiên đăng nhập đã hết, mời đăng nhập lại", true);
+      showLogin(); throw new Error("Chưa đăng nhập");
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const m = typeof data.detail === "string" ? data.detail
+        : res.status >= 500 ? `Máy chủ lỗi (${res.status}). Thử lại sau ít phút.` : "Lỗi " + res.status;
+      if (!opts.quiet) toast(m, true);
+      throw new Error(m);
+    }
+    return data;
+  } finally { loading(-1); unbusy(); }
 }
 const post = (p, body) => api(p, {method: "POST", body: body || {}});
 const patch = (p, body) => api(p, {method: "PATCH", body});
@@ -467,16 +621,50 @@ const del = p => api(p, {method: "DELETE"});
 // ---------- đăng nhập ----------
 async function showLogin() {
   closeModal();
+  state.me = null; render.lastTab = null;
   $("#app").classList.add("hidden"); $("#login").classList.remove("hidden"); $("#un").focus();
   const s = await fetch("/api/setup").then(r => r.json()).catch(() => ({has_users: true}));
   $("#setup-hint").classList.toggle("hidden", s.has_users);
 }
+// lỗi ngay dưới ô nhập (không chỉ toast): rung nhẹ thẻ, viền đỏ ô cần sửa
+function loginError(msg, focus) {
+  const box = $("#login-err");
+  box.textContent = msg ? "⚠️ " + msg : ""; box.classList.toggle("hidden", !msg);
+  for (const id of ["#un", "#pw"]) $(id).classList.toggle("invalid", !!msg && id === focus);
+  if (!msg) return;
+  const card = $("#login-form"); card.classList.remove("nudge"); void card.offsetWidth; card.classList.add("nudge");
+  if (focus) $(focus).focus();
+}
+function togglePw() {
+  const pw = $("#pw"), show = pw.type === "password";
+  pw.type = show ? "text" : "password";
+  $("#pw-eye").textContent = show ? "Ẩn" : "Hiện";
+  $("#pw-eye").setAttribute("aria-label", show ? "Ẩn mật khẩu" : "Hiện mật khẩu");
+  pw.focus();
+}
 async function doLogin(e) {
   e.preventDefault();
-  try { await post("/login", {username: $("#un").value, password: $("#pw").value}); } catch { return; }
-  $("#pw").value = ""; start();
+  const username = $("#un").value.trim(), password = $("#pw").value;
+  if (!username) return loginError("Nhập tên đăng nhập", "#un");
+  if (!password) return loginError("Nhập mật khẩu", "#pw");
+  loginError("");
+  const btn = $("#login-btn");
+  btn.disabled = true; btn.classList.add("busy");
+  try {
+    await api("/login", {method: "POST", body: {username, password}, quiet: true});
+  } catch (err) {
+    btn.disabled = false; btn.classList.remove("busy");
+    return loginError(err.message, /mật khẩu|Thiếu/i.test(err.message) ? "#pw" : null);
+  }
+  $("#pw").value = ""; $("#pw").type = "password"; $("#pw-eye").textContent = "Hiện";
+  await start();
+  btn.disabled = false; btn.classList.remove("busy");
+  if (state.me) toast(`✅ Đăng nhập thành công. Chào ${state.me.username}!`, "ok");
 }
-async function logout() { await post("/logout"); showLogin(); }
+async function logout() {
+  try { await post("/logout"); } catch { return; }
+  showLogin(); toast("Đã đăng xuất", "ok");
+}
 function accountMenu() {
   const me = state.me;
   openModal(`${modalHead(`👤 ${esc(me.username)} <span class="badge ${me.role === "admin" ? "b-accent" : "b-muted"}">${me.role}</span>`)}
@@ -529,7 +717,17 @@ function render() {
   if (state.tab === "users" && state.me?.role !== "admin") { state.tab = "home"; syncUrl(true); }
   $("#nav").innerHTML = TABS.filter(([k]) => k !== "users" || state.me?.role === "admin").map(([k, l]) =>
     `<a href="${ROUTES[k]}" class="${k === state.tab ? "on" : ""}" onclick="if(!event.ctrlKey&&!event.metaKey&&!event.shiftKey){event.preventDefault();go('${k}')}">${l}</a>`).join("");
-  ({home: viewHome, orders: viewOrders, sales: viewSales, products: viewProducts, people: viewPeople, phones: viewPhones, addresses: viewAddresses, lastmile: viewLastMile, users: viewUsers})[state.tab]();
+  // vào tab khác: hiện khung chờ ngay (trang cũ không đứng im tới khi có dữ liệu); tab lỗi tải → nút Thử lại
+  if (render.lastTab !== state.tab) { $("#view").innerHTML = skeleton(); render.lastTab = state.tab; scrollTo(0, 0); }
+  let r;
+  try { r = ({home: viewHome, orders: viewOrders, sales: viewSales, products: viewProducts, people: viewPeople, phones: viewPhones, addresses: viewAddresses, lastmile: viewLastMile, users: viewUsers})[state.tab](); }
+  catch (e) { r = Promise.reject(e); }
+  Promise.resolve(r).catch(e => {
+    if (!state.me || !$("#view .skel")) return;  // hết phiên (đã về màn đăng nhập) / trang đã vẽ một phần
+    $("#view").innerHTML = `<div class="empty view-err"><b>Không tải được trang này</b>
+      <span class="muted">${esc(e?.message || e)}</span>
+      <button class="btn primary" onclick="render.lastTab=null;render()">Thử lại</button></div>`;
+  });
 }
 function go(tab, extra) {
   // vào Đơn hàng từ tab khác (link "Xem đơn", ô trạng thái…) thì bỏ lọc ngày cũ
@@ -750,7 +948,7 @@ async function viewOrders() {
       <span id="ship-legend" class="ship-legend"></span>
       <span class="muted" id="orders-total"></span>
     </div>
-    <div id="orders" class="grid cards"></div>
+    <div id="orders" class="grid cards">${skelCards()}</div>
     <div id="pickbar"></div>
     <button class="btn primary fab" onclick="orderForm()">＋ Thêm đơn</button>`;
   renderPickbar();
@@ -1522,7 +1720,7 @@ function viewSales() {
       <button class="btn" id="stock-list" onclick="stockModal()">📋 Kết quả kiểm tra</button>
     </div>
     <div class="toolbar" id="sale-groups"></div>
-    <div id="sales" class="grid cards"></div>
+    <div id="sales" class="grid cards">${skelCards()}</div>
     <button class="btn primary fab" onclick="saleForm()">＋ Thêm sale</button>`;
   loadSales();
 }
@@ -2307,7 +2505,7 @@ function viewAddresses() {
       <input class="input grow" placeholder="🔍 Tìm địa chỉ…" value="${esc(state.addrQ || "")}"
         oninput="clearTimeout(this._t);this._t=setTimeout(()=>{state.addrQ=this.value;loadAddresses()},300)">
       <span class="meta" id="addr-count"></span></div>
-    <div id="addresses" class="grid cards"></div>
+    <div id="addresses" class="grid cards">${skelCards()}</div>
     <button class="btn primary fab" onclick="addressForm()">＋ Thêm địa chỉ</button>`;
   loadAddresses();
 }
