@@ -10,4 +10,23 @@ if time.timezone == 0 and os.environ["TZ"] == "Asia/Ho_Chi_Minh":
     os.environ["TZ"] = "ICT-7"
     time.tzset()
 
-from web import app  # noqa: E402,F401
+try:
+    from web import app  # noqa: E402,F401
+except Exception as _e:  # noqa: BLE001 – web không khởi động được: trả lỗi ra trang thay vì 500 trống của Vercel
+    import logging
+    import re
+    import traceback
+
+    logging.exception("Web không khởi động được")
+    _tb = traceback.extract_tb(_e.__traceback__)
+    _where = " ← ".join(f"{os.path.basename(f.filename)}:{f.lineno}" for f in reversed(_tb[-4:]))
+    # xóa mật khẩu trong chuỗi kết nối (postgresql://user:mật-khẩu@host) nếu lời báo lỗi có in ra
+    _msg = re.sub(r"(://[^:/@\s]+:)[^@\s]+@", r"\1***@", f"{type(_e).__name__}: {_e}")[:1500]
+
+    async def app(scope, receive, send):  # ASGI tối thiểu, không cần FastAPI
+        if scope["type"] != "http":
+            return
+        body = f"Web không khởi động được\n{_msg}\nTại: {_where}\n".encode()
+        await send({"type": "http.response.start", "status": 503,
+                    "headers": [(b"content-type", b"text/plain; charset=utf-8")]})
+        await send({"type": "http.response.body", "body": body})
