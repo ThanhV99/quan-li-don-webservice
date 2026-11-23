@@ -39,9 +39,10 @@ Cổng lấy từ `PORT` của Render.
 
 Import repo vào Vercel (preset FastAPI, không cần build command): điểm vào `app.py` (= `web:app`), thư viện theo
 `requirements.txt` (tạo lại bằng `pipenv requirements > requirements.txt` khi đổi Pipfile), Python theo `.python-version`.
-Environment: `DATABASE_URL` = chuỗi **Transaction pooler** của Supabase (cổng 6543), `TZ=Asia/Ho_Chi_Minh`,
+Environment: `DATABASE_URL` = chuỗi **Transaction pooler** của Supabase (cổng 6543),
 `FORWARDED_ALLOW_IPS=*`, `BOT_TOKEN`, `ALLOWED_USER_IDS`, các `VC_*` / `ADDR_ALIASES` (không cần `PROXY_URL`, `PG_*`).
 Vercel tự đặt `VERCEL=1` → web bỏ vòng lặp ảnh chạy nền và thư mục ảnh QR theo tên, `FILES_DIR` mặc định `/tmp/quan-li-don`.
+Vercel không cho đặt `TZ`: `app.py` tự đặt giờ Việt Nam (đổi bằng `APP_TZ`).
 
 Chạy trực tiếp (phát triển, cần 1 Postgres): `pipenv install && DATABASE_URL=postgresql://… pipenv run uvicorn web:app --port 8088`.
 
