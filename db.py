@@ -562,7 +562,8 @@ def _pg_raw():
         if not DATABASE_URL.startswith(("postgres://", "postgresql://")):
             raise RuntimeError("Thiếu DATABASE_URL (postgresql://user:mật-khẩu@host:5432/tên-db) trong .env của web")
         import psycopg
-        raw = psycopg.connect(DATABASE_URL, autocommit=False, connect_timeout=15)
+        # prepare_threshold=None: không dùng prepared statement (pooler kiểu transaction của Supabase cổng 6543 không giữ được)
+        raw = psycopg.connect(DATABASE_URL, autocommit=False, connect_timeout=15, prepare_threshold=None)
     _tls.pg, _tls.pg_used = raw, time.monotonic()
     return raw
 
