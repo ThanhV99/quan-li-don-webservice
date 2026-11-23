@@ -1,7 +1,8 @@
 # Tự kiểm tra hành trình đơn Đã đặt + gửi alert Telegram (web/shipwatch.py) khi web chạy trên Vercel (không chạy nền được).
-# Cần trong Settings của repo:
-#   Secrets  → SERVICE_TOKEN  (giống SERVICE_TOKEN của web)
-#   Variables → WEB_URL       (vd https://<tên>.vercel.app, không có / cuối)
+# Cần trong Settings → Environments → "production" (hoặc Secrets and variables → Actions ở mức repository):
+#   Secret   SERVICE_TOKEN  (giống SERVICE_TOKEN của web)
+#   Variable WEB_URL        (vd https://<tên>.vercel.app, không có / cuối)
+# Environment "production" không đặt "Required reviewers" (mỗi lượt sẽ chờ duyệt).
 # Thiếu 1 trong 2 → bỏ qua (không báo lỗi). GitHub có thể chạy trễ vài phút so với lịch; repo không có commit
 # 60 ngày thì GitHub tự tắt lịch (bật lại trong tab Actions).
 name: shipwatch
@@ -22,6 +23,7 @@ concurrency:
 jobs:
   pass:
     runs-on: ubuntu-latest
+    environment: production
     timeout-minutes: 3
     steps:
       - name: Gọi 1 lượt kiểm tra vận chuyển
