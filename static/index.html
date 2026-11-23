@@ -414,8 +414,47 @@ body:has(#pickbar:not(:empty)) #toasts { bottom: 200px; }
 .skel i.bar { height: 40px; max-width: 520px; border-radius: 10px; justify-self: start; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 .view-err { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+/* chuyển tab: phủ cả trang (chặn bấm liên tục) – thùng hàng nảy + bóng + chữ "Đang tải …"; chặn bấm ngay, hiện hình sau 120 ms */
+#pageload { position: fixed; inset: 0; z-index: 1050; display: none; place-items: center; cursor: progress;
+  background: color-mix(in srgb, var(--bg) 55%, transparent); backdrop-filter: blur(3px) saturate(.9);
+  -webkit-backdrop-filter: blur(3px) saturate(.9); opacity: 0; transition: opacity .18s ease; }
+#pageload.on { display: grid; }
+#pageload.show { opacity: 1; }
+.pl-card { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 26px 34px 20px; min-width: 210px;
+  border-radius: 18px; background: var(--card); border: 1px solid var(--line);
+  box-shadow: 0 18px 50px rgba(10,12,20,.22), 0 2px 6px rgba(10,12,20,.08); transform: translateY(6px) scale(.97);
+  transition: transform .25s cubic-bezier(.2,.9,.3,1.3); }
+#pageload.show .pl-card { transform: none; }
+.pl-stage { position: relative; width: 74px; height: 70px; }
+.pl-box { position: absolute; left: 13px; top: 6px; width: 48px; height: 40px; border-radius: 7px;
+  background: linear-gradient(180deg, #d9a35f, #c2853f); box-shadow: inset 0 -5px 0 rgba(0,0,0,.12);
+  animation: pl-bounce .9s cubic-bezier(.45,0,.55,1) infinite; transform-origin: 50% 100%; }
+.pl-box::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 10px; margin-left: -5px;
+  background: color-mix(in srgb, var(--accent) 75%, #fff); opacity: .9; }
+.pl-box::after { content: ""; position: absolute; left: -3px; right: -3px; top: -6px; height: 10px; border-radius: 4px;
+  background: linear-gradient(180deg, #e6b574, #d39a55); box-shadow: 0 1px 0 rgba(0,0,0,.08); }
+.pl-shadow { position: absolute; left: 50%; bottom: 2px; width: 50px; height: 8px; margin-left: -25px; border-radius: 50%;
+  background: rgba(10,12,20,.22); animation: pl-shadow .9s cubic-bezier(.45,0,.55,1) infinite; }
+@keyframes pl-bounce {
+  0%, 100% { transform: translateY(16px) scale(1.08, .9); }
+  15% { transform: translateY(10px) scale(.96, 1.05); }
+  50% { transform: translateY(-6px) rotate(-6deg); }
+  85% { transform: translateY(12px) scale(1, 1); } }
+@keyframes pl-shadow { 0%, 100% { transform: scale(1); opacity: .9; } 50% { transform: scale(.55); opacity: .4; } }
+.pl-text { font-weight: 600; font-size: 15px; display: flex; align-items: baseline; gap: 2px; }
+.pl-text small { display: block; color: var(--muted); font-weight: 500; font-size: 12.5px; text-align: center; }
+.pl-dots i { display: inline-block; width: 4px; height: 4px; margin-left: 3px; border-radius: 50%; background: var(--accent);
+  animation: pl-dot 1.2s ease-in-out infinite; }
+.pl-dots i:nth-child(2) { animation-delay: .15s; } .pl-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes pl-dot { 0%, 60%, 100% { transform: translateY(0); opacity: .35; } 30% { transform: translateY(-4px); opacity: 1; } }
+.pl-track { width: 150px; height: 4px; border-radius: 99px; overflow: hidden; position: relative;
+  background: color-mix(in srgb, var(--line) 70%, var(--card)); }
+.pl-track::before { content: ""; position: absolute; top: 0; bottom: 0; width: 45%; border-radius: 99px;
+  background: linear-gradient(90deg, transparent, var(--accent)); animation: loadbar 1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   #loadbar::before, .skel i, .skel-card, .toast, .toast.out { animation: none; }
+  .pl-box, .pl-shadow, .pl-dots i, .pl-card { animation: none; transition: none; }
+  .pl-track::before { animation: none; left: 0; width: 100%; opacity: .6; }
   #loadbar.on::before { left: 0; width: 100%; opacity: .6; }
   .btn.busy::after { animation-duration: 2s; }
 }
@@ -495,6 +534,11 @@ body:has(#pickbar:not(:empty)) #toasts { bottom: 200px; }
 </div>
 <div id="toasts" aria-live="polite"></div>
 <div id="loadbar" aria-hidden="true"></div>
+<div id="pageload" role="status" aria-live="polite"><div class="pl-card">
+  <div class="pl-stage" aria-hidden="true"><span class="pl-shadow"></span><span class="pl-box"></span></div>
+  <div><div class="pl-text">Đang tải<span class="pl-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+  <small class="pl-sub" id="pageload-sub"></small></div>
+  <div class="pl-track" aria-hidden="true"></div></div></div>
 <div id="modal-root"></div>
 
 <script>
@@ -558,7 +602,30 @@ function loading(delta) {
   clearTimeout(loading.t);
   if (pending) loading.t = setTimeout(() => $("#loadbar").classList.add("on"), 120);
   else $("#loadbar").classList.remove("on");
+  if (!pending && pageLoad.on) pageLoad.check();
 }
+// chuyển tab: phủ cả trang tới khi view vẽ xong + hết lệnh gọi máy chủ (chặn bấm liên tục / bấm nhầm khi trang chưa ra);
+// chặn bấm ngay, chỉ hiện hình sau 120 ms (tab nhanh không nháy), luôn tự tắt sau 20 s
+function pageLoad(label) {
+  const el = $("#pageload");
+  clearTimeout(pageLoad.t); clearTimeout(pageLoad.safe); clearTimeout(pageLoad.hide);
+  pageLoad.on = true; pageLoad.viewDone = false;
+  $("#pageload-sub").textContent = label || "";
+  el.classList.add("on");
+  pageLoad.t = setTimeout(() => el.classList.add("show"), 120);
+  pageLoad.safe = setTimeout(pageLoad.done, 20000);
+}
+pageLoad.check = () => {
+  clearTimeout(pageLoad.hide);
+  // chờ 1 nhịp: view có thể gọi tiếp lệnh khác ngay sau lệnh đầu
+  pageLoad.hide = setTimeout(() => { if (pageLoad.on && pageLoad.viewDone && !pending) pageLoad.done(); }, 80);
+};
+pageLoad.done = () => {
+  const el = $("#pageload");
+  clearTimeout(pageLoad.t); clearTimeout(pageLoad.safe); clearTimeout(pageLoad.hide);
+  pageLoad.on = false; el.classList.remove("show");
+  setTimeout(() => { if (!pageLoad.on) el.classList.remove("on"); }, 180);
+};
 document.addEventListener("click", e => {
   const b = e.target.closest?.(".btn"); if (b) lastBtn = {el: b, t: performance.now()};
 }, true);
@@ -718,10 +785,15 @@ function render() {
   $("#nav").innerHTML = TABS.filter(([k]) => k !== "users" || state.me?.role === "admin").map(([k, l]) =>
     `<a href="${ROUTES[k]}" class="${k === state.tab ? "on" : ""}" onclick="if(!event.ctrlKey&&!event.metaKey&&!event.shiftKey){event.preventDefault();go('${k}')}">${l}</a>`).join("");
   // vào tab khác: hiện khung chờ ngay (trang cũ không đứng im tới khi có dữ liệu); tab lỗi tải → nút Thử lại
-  if (render.lastTab !== state.tab) { $("#view").innerHTML = skeleton(); render.lastTab = state.tab; scrollTo(0, 0); }
+  const newTab = render.lastTab !== state.tab;
+  if (newTab) {
+    $("#view").innerHTML = skeleton(); render.lastTab = state.tab; scrollTo(0, 0);
+    pageLoad((TABS.find(([k]) => k === state.tab) || [])[1]);
+  }
   let r;
   try { r = ({home: viewHome, orders: viewOrders, sales: viewSales, products: viewProducts, people: viewPeople, phones: viewPhones, addresses: viewAddresses, lastmile: viewLastMile, users: viewUsers})[state.tab](); }
   catch (e) { r = Promise.reject(e); }
+  if (newTab) Promise.resolve(r).finally(() => { pageLoad.viewDone = true; pageLoad.check(); }).catch(() => {});
   Promise.resolve(r).catch(e => {
     if (!state.me || !$("#view .skel")) return;  // hết phiên (đã về màn đăng nhập) / trang đã vẽ một phần
     $("#view").innerHTML = `<div class="empty view-err"><b>Không tải được trang này</b>
