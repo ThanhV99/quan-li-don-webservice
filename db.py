@@ -618,7 +618,28 @@ SEED_PRODUCTS = {
 DEFAULT_CARRIERS = ["SPX", "J&T", "GHN", "GHTK", "Viettel Post", "Ninja Van", "Best Express"]
 
 
+# đổi mỗi khi sửa db.py (bảng, cột, dữ liệu mẫu đều nằm ở đây) → init_db chạy đầy đủ 1 lần rồi ghi vào meta
+INIT_DB_KEY = "init_db_version"
+INIT_DB_VERSION = hashlib.sha256(open(__file__, "rb").read()).hexdigest()[:16]
+
+
 def init_db():
+    """Tạo / nâng cấp bảng + dữ liệu mẫu. Cùng phiên bản db.py đã chạy rồi (meta.init_db_version) → bỏ qua, chỉ tốn
+    1 câu SQL (Vercel khởi động lạnh rất thường, database ở xa: chạy đủ ~60 câu mỗi lần mất cả chục giây)."""
+    try:
+        with connect() as conn:
+            row = conn.execute("SELECT value FROM meta WHERE key = ?", (INIT_DB_KEY,)).fetchone()
+        if row and row[0] == INIT_DB_VERSION:
+            return
+    except Exception as e:  # noqa: BLE001 – database mới chưa có bảng meta → chạy đầy đủ
+        log.info("Chạy init_db đầy đủ: %s", e)
+    _init_db_full()
+    with connect() as conn:
+        conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                     (INIT_DB_KEY, INIT_DB_VERSION))
+
+
+def _init_db_full():
     with connect() as conn:  # hàm name_key() cho các câu SQL (so tên không phân biệt hoa thường, gộp khoảng trắng)
         conn.execute(PG_NAME_KEY_FUNC)
     with connect() as conn:
