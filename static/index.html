@@ -43,6 +43,8 @@ nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; flex: 1;
 nav::-webkit-scrollbar { display: none; }
 /* tab cuối bị cắt khi hết chỗ → mờ dần ở mép phải thay vì cắt ngang chữ */
 nav { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); padding-right: 24px; }
+/* màn rộng: tab xuống dòng thay vì trốn ra ngoài mép phải (điện thoại vẫn vuốt ngang) */
+@media (min-width: 900px) { nav { flex-wrap: wrap; overflow: visible; -webkit-mask-image: none; mask-image: none; padding-right: 0; } }
 nav a { border: 0; background: none; padding: 8px 12px; border-radius: 10px; cursor: pointer;
   color: var(--muted); white-space: nowrap; font-weight: 500; text-decoration: none; }
 nav a:hover { color: var(--text); background: var(--bg); }
@@ -790,6 +792,7 @@ function render() {
   if (ADMIN_TABS.includes(state.tab) && state.me?.role !== "admin") { state.tab = "home"; syncUrl(true); }
   $("#nav").innerHTML = TABS.filter(([k]) => !ADMIN_TABS.includes(k) || state.me?.role === "admin").map(([k, l]) =>
     `<a href="${ROUTES[k]}" class="${k === state.tab ? "on" : ""}" onclick="if(!event.ctrlKey&&!event.metaKey&&!event.shiftKey){event.preventDefault();go('${k}')}">${l}</a>`).join("");
+  $("#nav a.on")?.scrollIntoView({block: "nearest", inline: "center"});  // điện thoại: tab đang chọn luôn trong tầm nhìn
   // vào tab khác: hiện khung chờ ngay (trang cũ không đứng im tới khi có dữ liệu); tab lỗi tải → nút Thử lại
   const newTab = render.lastTab !== state.tab;
   if (newTab) {
