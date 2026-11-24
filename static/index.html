@@ -2782,7 +2782,27 @@ async function viewAlertBot() {
     ${c.env_admins.map(id => `<code>${esc(id)}</code>`).join(", ")}</div>` : "";
   const e = c.env;
   const on = c.recipients.filter(r => r.trang_thai === "da_duyet").length;
+  const botLinks = c.bots.filter(b => b.username).map(b => botLink(b.username) + (b.mac_dinh ? " (⭐ mặc định)" : "")).join(", ")
+    || (e.bot?.username ? botLink(e.bot.username) : "bot alert");
+  let guideOpen = true; try { guideOpen = localStorage.getItem("qld_alert_guide") !== "0"; } catch {}
   $("#view").innerHTML = `
+    <details class="card" style="margin-bottom:14px" ${guideOpen ? "open" : ""}
+      ontoggle="try{localStorage.setItem('qld_alert_guide',this.open?'1':'0')}catch{}">
+      <summary style="cursor:pointer;font-weight:650">📖 Hướng dẫn nhận thông báo vận chuyển qua Telegram</summary>
+      <ol style="margin:10px 0 0;padding-left:22px;line-height:1.7">
+        <li><b>Lấy Telegram ID:</b> trên Telegram mở <a href="https://t.me/userinfobot" target="_blank" rel="noopener">@userinfobot</a>, bấm <b>Start</b>
+          → bot trả lời <code>Id: 123456789</code>. Dãy số đó là Telegram ID (không phải @username).</li>
+        <li><b>Mở bot sẽ gửi tin cho mình và bấm Start:</b> ${botLinks}. <b>Bắt buộc</b> – Telegram không cho bot nhắn trước
+          cho người chưa từng bấm Start. Lỡ chặn bot thì mở lại bot, bấm Start / Restart.</li>
+        <li><b>Gửi Telegram ID cho admin.</b> Admin bấm <b>＋ Thêm người nhận</b> ở bảng dưới: dán ID, chọn bot gửi (đúng bot người đó đã bấm Start),
+          gắn hồ sơ người đặt nếu có. Để trống tên / username thì web tự lấy từ Telegram.</li>
+        <li><b>Bấm 📨 Gửi thử</b> ở dòng người đó → nhận được tin "✅ Tin thử…" là xong.
+          Báo lỗi <code>chat not found</code> / <code>bot was blocked</code> = người đó chưa bấm Start đúng bot (hoặc đã chặn bot).</li>
+      </ol>
+      <div class="meta" style="margin-top:8px">Bot tự gửi khi đơn ⏳ Đã đặt sắp giao / đang giao / có mốc giao mới (giao thành công, thất bại, hẹn lại…).
+        Tin đơn bị hủy / hoàn chỉ gửi admin trong .env. Muốn tạm ngưng nhận: bấm vào người đó → Nhận alert: ⏸ Tắt.
+        Nhận vào nhóm: thêm bot vào nhóm rồi dùng ID nhóm (số âm, bắt đầu <code>-100</code>).</div>
+    </details>
     <div class="toolbar"><b>🤖 Bảng bot</b><span class="meta">dán token, tên bot tự lấy từ Telegram</span><span class="grow"></span>
       <button class="btn primary" onclick="alertBotForm()">＋ Thêm bot</button></div>
     <div class="card" style="margin-bottom:8px"><table style="min-width:760px">
@@ -2805,8 +2825,7 @@ async function viewAlertBot() {
         <td>${botStatus(e.bot)}</td></tr>`
         : '<tr><td colspan="5" class="muted">Chưa có bot – bấm ＋ Thêm bot và dán token từ @BotFather</td></tr>'}
     </table></div>
-    <div class="meta" style="margin-bottom:16px">Người nhận phải mở đúng bot của mình và bấm <b>Start</b> một lần thì bot mới nhắn được.
-      Lấy Telegram ID: nhắn <a href="https://t.me/userinfobot" target="_blank" rel="noopener">@userinfobot</a>.</div>
+    <div style="margin-bottom:16px"></div>
     <div class="toolbar"><b>📨 Bảng người nhận</b><span class="meta">${on}/${c.recipients.length} đang nhận alert</span><span class="grow"></span>
       <button class="btn primary" onclick="alertRcptForm()">＋ Thêm người nhận</button></div>
     <div class="card"><table style="min-width:860px">
