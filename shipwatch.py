@@ -12,8 +12,10 @@ trong FIRST_CHECK_MINUTES. Giờ hẹn + chữ ký mốc đã báo (vc_alert_las
 Một lúc chỉ 1 lượt chạy (db.take_lease) → không báo trùng khi cron và lệnh bot chạy cùng lúc.
 
 Chỉ GỬI tin (người dùng chọn 23/11/2026: bot Telegram không cần chạy / lắng nghe liên tục nữa): sendMessage của
-Bot API bằng token nhập ở web (tab 🤖 Bot alert, admin; trống thì ALERT_BOT_TOKEN, rồi BOT_TOKEN) tới ALERT_CHAT_IDS
-(trống thì ALLOWED_USER_IDS) + người đã duyệt trong alert_users (admin thêm telegram_id ở tab đó). Không có nút bấm / deep link bot: link trong tin mở trang đơn trên web
+Bot API tới ALERT_CHAT_IDS (trống thì ALLOWED_USER_IDS) + người đã duyệt trong alert_users. Admin quản lý ở tab
+🤖 Bot alert: bảng các bot (token) + telegram_id người nhận, mỗi người nhận qua bot đã chọn
+(chưa chọn / admin trong .env = ALERT_BOT_TOKEN, trống thì BOT_TOKEN).
+Không có nút bấm / deep link bot: link trong tin mở trang đơn trên web
 (PUBLIC_URL/don-hang?don=<id>&tra=1); đơn bị hủy / hoàn → tin cho admin kèm link mở đơn để tự chuyển Đã hủy.
 """
 import asyncio
@@ -72,14 +74,9 @@ async def tg(token: str, method: str, **payload) -> dict:
     return data["result"]
 
 
-ALERT_TOKEN_META = "alert_bot_token"  # meta: token bot alert admin nhập ở web (tab 🤖 Bot alert), đè .env
-
-
-def _alert_token() -> tuple[str, str]:
-    """(token, nguồn) gửi alert: nhập trên web ("web") > ALERT_BOT_TOKEN ("env") > bot chính BOT_TOKEN ("main").
-    Tên bắt đầu "_" → không lộ qua API dịch vụ của bot (/api/svc/shipwatch.*)."""
-    if token := (db.get_meta(ALERT_TOKEN_META) or "").strip():
-        return token, "web"
+def _default_token() -> tuple[str, str]:
+    """(token, nguồn) của bot mặc định – cho admin trong .env và người nhận chưa chọn bot:
+    ALERT_BOT_TOKEN ("env") > bot chính BOT_TOKEN ("main"). Tên bắt đầu "_" → không lộ qua API dịch vụ của bot."""
     if ALERT_BOT_TOKEN:
         return ALERT_BOT_TOKEN, "env"
     return (BOT_TOKEN, "main") if BOT_TOKEN else ("", "")
@@ -97,21 +94,33 @@ def alert_recipients() -> list[int]:
     return list(chats)
 
 
+def _alert_targets(chat_ids: list[int] | None = None) -> list[tuple[int, str]]:
+    """[(chat_id, token bot gửi)]: người nhận đã chọn bot (tab 🤖 Bot alert) thì gửi bằng bot đó, còn lại bot mặc định."""
+    bots = {b["id"]: b["token"] for b in db.list_alert_bots()}
+    users = {u["chat_id"]: u for u in db.list_alert_users()}
+    default = _default_token()[0]
+    out = []
+    for chat_id in (alert_recipients() if chat_ids is None else chat_ids):
+        u = users.get(chat_id)
+        if token := (u and u["bot_id"] and bots.get(u["bot_id"])) or default:
+            out.append((chat_id, token))
+    return out
+
+
 async def send_alert(text: str, chat_ids: list[int] | None = None) -> int:
-    """Gửi bằng bot alert (chưa cấu hình thì bot chính) tới mọi người nhận (hoặc chat_ids). Trả về số tin gửi được."""
-    token = _alert_token()[0]
-    chat_ids = alert_recipients() if chat_ids is None else chat_ids
-    if not token or not chat_ids:
-        log.warning("Chưa có token bot alert (web tab Bot alert / ALERT_BOT_TOKEN / BOT_TOKEN) hoặc người nhận "
+    """Gửi tới mọi người nhận (hoặc chat_ids), mỗi người bằng bot của mình. Trả về số tin gửi được."""
+    targets = _alert_targets(chat_ids)
+    if not targets:
+        log.warning("Chưa có bot alert (tab Bot alert / ALERT_BOT_TOKEN / BOT_TOKEN) hoặc người nhận "
                     "(tab Bot alert / ALERT_CHAT_IDS / ALLOWED_USER_IDS) để gửi alert")
         return 0
     sent = 0
-    for chat_id in chat_ids:
+    for chat_id, token in targets:
         try:
             await tg(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
             sent += 1
         except Exception as e:  # noqa: BLE001 – vd người nhận chưa bấm Start với bot alert
-            log.warning("Gửi alert tới %s lỗi: %s", chat_id, e)
+            log.warning("Gửi alert tới %s lỗi: %s", chat_id, str(e).replace(token, "***"))
     return sent
 
 

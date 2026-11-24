@@ -296,6 +296,16 @@ CREATE TABLE IF NOT EXISTS alert_users (
     updated_at  TEXT
 );
 
+-- các bot gửi alert admin nhập ở web (tab 🤖 Bot alert); alert_users.bot_id chọn bot gửi cho từng người
+-- (NULL = bot mặc định trong .env: ALERT_BOT_TOKEN, trống thì BOT_TOKEN)
+CREATE TABLE IF NOT EXISTS alert_bots (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    token       TEXT NOT NULL UNIQUE,
+    ten         TEXT,
+    username    TEXT,
+    created_at  TEXT NOT NULL
+);
+
 -- người đặt hộ (orders.ten_nguoi_dat): lưu 1 ảnh QR trả công dùng chung cho mọi đơn của người đó
 CREATE TABLE IF NOT EXISTS nguoi_dat (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -667,9 +677,19 @@ def _init_db_full():
                 conn.execute("INSERT INTO carriers (ten, created_at) VALUES (?, ?) ON CONFLICT DO NOTHING", (name, _now()))
         alert_cols = table_columns(conn, "alert_users")
         for col, ddl in (("username", "TEXT"), ("trang_thai", "TEXT NOT NULL DEFAULT 'da_duyet'"),
-                         ("updated_at", "TEXT")):
+                         ("updated_at", "TEXT"), ("bot_id", "INTEGER"),
+                         ("nguoi_dat_id", "INTEGER")):
             if col not in alert_cols:
                 conn.execute(f"ALTER TABLE alert_users ADD COLUMN {col} {ddl}")
+        # token bot alert trước đây lưu 1 cái trong meta (đè .env cho mọi người nhận) → thành 1 dòng alert_bots,
+        # người nhận chưa chọn bot dùng bot đó như trước
+        if (old_token := conn.execute("SELECT value FROM meta WHERE key = 'alert_bot_token'").fetchone()):
+            if (token := (old_token[0] or "").strip()):
+                conn.execute("INSERT INTO alert_bots (token, created_at) VALUES (?, ?) ON CONFLICT DO NOTHING",
+                             (token, _now()))
+                bot_id = conn.execute("SELECT id FROM alert_bots WHERE token = ?", (token,)).fetchone()[0]
+                conn.execute("UPDATE alert_users SET bot_id = ? WHERE bot_id IS NULL", (bot_id,))
+            conn.execute("DELETE FROM meta WHERE key = 'alert_bot_token'")
         # người nhận alert trước đây lưu dạng JSON trong meta
         if (old_alert := conn.execute("SELECT value FROM meta WHERE key = 'alert_chats'").fetchone()):
             for cid, name in json.loads(old_alert[0] or "{}").items():
@@ -944,6 +964,29 @@ def reserve_slot(key: str, gap: float) -> float:
 _slot_lock = threading.Lock()
 
 
+def take_cooldown(key: str, seconds: float) -> float:
+    """Khóa có hạn (như Redis SET NX EX) trong bảng meta, giá trị = giờ hết hạn (epoch, không lệ thuộc múi giờ).
+    Trả về 0 = vừa giữ được khóa; > 0 = khóa đang bị giữ, còn chừng đó giây. Đặt + kiểm tra trong 1 câu lệnh →
+    2 request cùng lúc chỉ 1 cái giữ được. Khóa cùng tiền tố đã hết hạn bị dọn luôn."""
+    now = time.time()
+    prefix = key.split(":", 1)[0] + ":"
+    with connect() as conn:
+        # CASE: Postgres không hứa xét LIKE trước → không CAST nhầm giá trị chữ của khóa meta khác
+        conn.execute("DELETE FROM meta WHERE key != ? AND "
+                     "(CASE WHEN key LIKE ? THEN CAST(value AS DOUBLE PRECISION) END) < ?", (key, prefix + "%", now))
+        if conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value "
+                        "WHERE CAST(meta.value AS DOUBLE PRECISION) <= ? RETURNING key",
+                        (key, f"{now + seconds:.3f}", now)).fetchone():
+            return 0
+        row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return max(float(row[0]) - now, 1) if row else 0
+
+
+def release_cooldown(key: str):
+    with connect() as conn:
+        conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+
+
 def _take_slot(conn, key: str, gap: float) -> float:
     row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
     now = time.time()
@@ -1213,6 +1256,54 @@ def remove_alert_user(chat_id: int):
         return row
 
 
+def set_alert_user_links(chat_id: int, bot_id: int | None, person_id: int | None):
+    """Bot gửi (alert_bots.id, None = bot mặc định .env) + hồ sơ người đặt (nguoi_dat.id) của 1 người nhận."""
+    with connect() as conn:
+        conn.execute("UPDATE alert_users SET bot_id = ?, nguoi_dat_id = ? WHERE chat_id = ?", (bot_id, person_id, chat_id))
+
+
+# ---------- các bot gửi alert (có token: không đưa vào SVC_DB_FUNCS của web) ----------
+
+def list_alert_bots():
+    with connect() as conn:
+        return conn.execute("SELECT * FROM alert_bots ORDER BY id").fetchall()
+
+
+def get_alert_bot(bot_id: int):
+    with connect() as conn:
+        return conn.execute("SELECT * FROM alert_bots WHERE id = ?", (bot_id,)).fetchone()
+
+
+def find_alert_bot(token: str):
+    with connect() as conn:
+        return conn.execute("SELECT * FROM alert_bots WHERE token = ?", (token,)).fetchone()
+
+
+def add_alert_bot(token: str, name: str | None, username: str | None) -> int:
+    with connect() as conn:
+        return conn.execute("INSERT INTO alert_bots (token, ten, username, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+                            (token, name, username, _now())).fetchone()[0]
+
+
+def update_alert_bot(bot_id: int, **fields):
+    """Sửa token / ten / username."""
+    fields = {k: v for k, v in fields.items() if k in ("token", "ten", "username")}
+    if fields:
+        with connect() as conn:
+            conn.execute(f"UPDATE alert_bots SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?",
+                         (*fields.values(), bot_id))
+
+
+def remove_alert_bot(bot_id: int):
+    """Xóa bot; người nhận đang dùng bot này quay về bot mặc định (.env). Trả về dòng đã xóa."""
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM alert_bots WHERE id = ?", (bot_id,)).fetchone()
+        if row:
+            conn.execute("UPDATE alert_users SET bot_id = NULL WHERE bot_id = ?", (bot_id,))
+            conn.execute("DELETE FROM alert_bots WHERE id = ?", (bot_id,))
+        return row
+
+
 # ---------- người đặt hộ ----------
 
 def _upsert_person(conn, name: str, sdt: str | None = None, qr: str | None = None) -> int:
@@ -1449,6 +1540,7 @@ def merge_people(source_ids: list[int], target_id: int) -> int:
             if p["qr_file_id"] and not t["qr_file_id"]:
                 _set_person_qr(conn, target_id, p["qr_file_id"])
                 t = conn.execute("SELECT * FROM nguoi_dat WHERE id = ?", (target_id,)).fetchone()
+            conn.execute("UPDATE alert_users SET nguoi_dat_id = ? WHERE nguoi_dat_id = ?", (target_id, sid))
             conn.execute("DELETE FROM nguoi_dat WHERE id = ?", (sid,))
         if t["qr_file_id"]:  # đơn vừa chuyển sang dùng QR của target
             _set_person_qr(conn, target_id, t["qr_file_id"])
@@ -1458,6 +1550,7 @@ def merge_people(source_ids: list[int], target_id: int) -> int:
 def delete_person(person_id: int) -> bool:
     """Xóa khỏi danh sách; các đơn vẫn giữ tên và ảnh QR."""
     with connect() as conn:
+        conn.execute("UPDATE alert_users SET nguoi_dat_id = NULL WHERE nguoi_dat_id = ?", (person_id,))
         return conn.execute("DELETE FROM nguoi_dat WHERE id = ?", (person_id,)).rowcount > 0
 
 

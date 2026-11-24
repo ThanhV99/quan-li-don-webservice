@@ -46,6 +46,8 @@ MERGE_PATH = re.compile(r"/api/people/\d+/merge")
 # bot không có logic riêng: gọi hàm của web qua API (/api/svc/<module>.<hàm>, bot/remote.py) bằng token dịch vụ
 # thay cho cookie đăng nhập
 SERVICE_TOKEN = os.getenv("SERVICE_TOKEN", "")
+# bấm 🚚 tra 1 mã: trong chừng này phút sau lần gọi hãng trước thì trả bản vừa lưu, không gọi hãng lại (0 = tắt)
+TRACK_COOLDOWN_MINUTES = float(os.getenv("TRACK_COOLDOWN_MINUTES", "5") or 0)
 SVC_PREFIX = "/api/svc/"
 SVC_INFO = "__info__"  # <module>.__info__ → hằng số + tên hàm (+ hàm async / hàm thuần) cho bot
 SVC_MODULES = {"db": db, "tracking": tracking, "sale_text": sale_text, "utils": utils, "alert_rules": alert_rules,
@@ -385,8 +387,11 @@ def delete_user(user_id: int, request: Request):
     return {"ok": True}
 
 
-# ---------- bot alert Telegram (admin, tab 🤖 Bot alert): token + telegram_id người nhận ----------
-# token lưu ở meta (shipwatch.ALERT_TOKEN_META), không bao giờ trả nguyên token về trình duyệt – chỉ bản che
+# ---------- bot alert Telegram (admin, tab 🤖 Bot alert): bảng các bot (token) + telegram_id người nhận ----------
+# token trả về trình duyệt dạng che; xem đủ token: GET /api/alert-bot/bots/{id}/token (admin, bấm 👁)
+
+TOKEN_RE = re.compile(r"\d{5,15}:[A-Za-z0-9_-]{30,60}")
+
 
 def mask_token(token: str) -> str:
     bot_id, _, secret = token.partition(":")
@@ -402,6 +407,17 @@ async def bot_info(token: str) -> dict:
         return {"ok": False, "error": str(e).replace(token, "***")}
 
 
+async def checked_token(raw) -> tuple[str, dict]:
+    """Token admin nhập: đúng dạng + Telegram nhận (getMe) → (token, info)."""
+    token = str(raw or "").strip()
+    if not TOKEN_RE.fullmatch(token):
+        raise ValueError("Token không đúng dạng 123456789:ABC… (lấy từ @BotFather)")
+    info = await bot_info(token)
+    if not info["ok"]:
+        raise ValueError(f"Telegram không nhận token này: {info['error']}")
+    return token, info
+
+
 def parse_chat_id(raw) -> int:
     s = str(raw or "").strip()
     if not re.fullmatch(r"-?\d{4,20}", s):
@@ -409,58 +425,147 @@ def parse_chat_id(raw) -> int:
     return int(s)
 
 
+def parse_bot_id(raw) -> int | None:
+    """Bot gửi cho 1 người nhận: ''/0 = bot mặc định (.env)."""
+    if raw in (None, "", 0, "0"):
+        return None
+    if not str(raw).isdigit() or not db.get_alert_bot(int(raw)):
+        raise ValueError("Không có bot này")
+    return int(raw)
+
+
+def parse_person_id(raw) -> int | None:
+    """Hồ sơ người đặt gắn với 1 người nhận: ''/0 = không gắn."""
+    if raw in (None, "", 0, "0"):
+        return None
+    if not str(raw).isdigit() or not db.get("nguoi_dat", int(raw)):
+        raise ValueError("Không có người đặt này")
+    return int(raw)
+
+
+async def tg_profile(chat_id: int) -> dict:
+    """Tên + @username Telegram của 1 người nhận (getChat bằng bot gửi cho họ; chỉ được khi họ đã bấm Start bot).
+    Lỗi → {}."""
+    targets = shipwatch._alert_targets([chat_id])
+    if not targets:
+        return {}
+    try:
+        c = await shipwatch.tg(targets[0][1], "getChat", chat_id=chat_id)
+    except Exception:  # noqa: BLE001
+        return {}
+    name = " ".join(x for x in (c.get("first_name"), c.get("last_name")) if x) or c.get("title")
+    return {"ten": name, "username": c.get("username")}
+
+
 @app.get("/api/alert-bot")
 async def alert_bot(check: int = 0):
-    """Cấu hình bot alert: token đang dùng (che) + nguồn, người nhận (bảng alert_users) + admin trong .env.
-    check=1: gọi getMe xem token còn đúng không (lấy tên bot cho link t.me)."""
-    token, source = shipwatch._alert_token()
-    out = {"source": source, "masked": mask_token(token) if token else "",
+    """Bot mặc định (.env, che token) + các bot nhập ở web (che token) + người nhận + admin trong .env.
+    check=1: gọi getMe từng bot xem token còn đúng không (lấy @username cho link t.me, lưu lại nếu đổi)."""
+    token, source = shipwatch._default_token()
+    bots = db.list_alert_bots()
+    out = {"default": {"source": source, "masked": mask_token(token) if token else ""},
+           "bots": [{"id": b["id"], "ten": b["ten"], "username": b["username"], "masked": mask_token(b["token"]),
+                     "created_at": b["created_at"]} for b in bots],
            "env_admins": shipwatch.admin_ids(),
            "recipients": [dict(r) for r in db.list_alert_users()]}
-    if check and token:
-        out["bot"] = await bot_info(token)
+    with db.connect() as conn:  # chọn hồ sơ người đặt cho người nhận
+        out["people"] = [dict(p) for p in conn.execute("SELECT id, ten, sdt FROM nguoi_dat ORDER BY ten_key")]
+    if check:
+        infos = list(await asyncio.gather(*(bot_info(t) for t in ([token] if token else []) + [b["token"] for b in bots])))
+        if token:
+            out["default"]["bot"] = infos.pop(0)
+        for b, row, info in zip(out["bots"], bots, infos):
+            b["bot"] = info
+            if info["ok"] and (info["username"] != row["username"] or info["name"] != row["ten"]):
+                db.update_alert_bot(row["id"], username=info["username"], ten=info["name"])  # tên bot đổi ở BotFather
+                b["username"], b["ten"] = info["username"], info["name"]
     return out
 
 
-@app.put("/api/alert-bot/token")
-async def set_alert_token(request: Request):
-    """Lưu token bot alert (kiểm tra bằng getMe trước); token rỗng = xóa, quay về .env."""
-    token = str((await request.json()).get("token") or "").strip()
-    if not token:
-        db.set_meta(shipwatch.ALERT_TOKEN_META, "")
-        return {"ok": True}
-    if not re.fullmatch(r"\d{5,15}:[A-Za-z0-9_-]{30,60}", token):
-        raise ValueError("Token không đúng dạng 123456789:ABC… (lấy từ @BotFather)")
-    info = await bot_info(token)
-    if not info["ok"]:
-        raise ValueError(f"Telegram không nhận token này: {info['error']}")
-    db.set_meta(shipwatch.ALERT_TOKEN_META, token)
+@app.get("/api/alert-bot/bots/{bot_id}/token")
+def alert_bot_token(bot_id: int):
+    """Token đầy đủ (admin bấm 👁 / 📋)."""
+    if not (b := db.get_alert_bot(bot_id)):
+        raise HTTPException(404, "Không có bot này")
+    return {"token": b["token"]}
+
+
+@app.post("/api/alert-bot/bots")
+async def add_alert_bot(request: Request):
+    body = await request.json()
+    token, info = await checked_token(body.get("token"))
+    if db.find_alert_bot(token):
+        raise ValueError("Bot này đã có trong bảng")
+    # tên + @username lấy từ Telegram (getMe), không cần nhập
+    bot_id = db.add_alert_bot(token, info.get("name"), info.get("username"))
+    return {"ok": True, "id": bot_id, "bot": info}
+
+
+@app.patch("/api/alert-bot/bots/{bot_id}")
+async def update_alert_bot(bot_id: int, request: Request):
+    """Đổi token (kiểm tra rồi thay, tên + @username lấy lại từ Telegram)."""
+    if not db.get_alert_bot(bot_id):
+        raise HTTPException(404, "Không có bot này")
+    token, info = await checked_token((await request.json()).get("token"))
+    if (other := db.find_alert_bot(token)) and other["id"] != bot_id:
+        raise ValueError("Token này đã có ở bot khác trong bảng")
+    db.update_alert_bot(bot_id, token=token, ten=info.get("name"), username=info.get("username"))
     return {"ok": True, "bot": info}
+
+
+@app.delete("/api/alert-bot/bots/{bot_id}")
+def delete_alert_bot(bot_id: int):
+    if not db.remove_alert_bot(bot_id):
+        raise HTTPException(404, "Không có bot này")
+    return {"ok": True}
 
 
 @app.post("/api/alert-bot/recipients")
 async def add_alert_recipient(request: Request):
     body = await request.json()
     chat_id = parse_chat_id(body.get("chat_id"))
-    db.upsert_alert_user(chat_id, clean(body.get("ten")), clean(str(body.get("username") or "").lstrip("@")),
-                         db.ALERT_APPROVED)
+    bot_id, person_id = parse_bot_id(body.get("bot_id")), parse_person_id(body.get("nguoi_dat_id"))
+    if db.get_alert_user(chat_id):
+        raise ValueError("Telegram ID này đã có trong bảng – bấm vào dòng đó để sửa")
+    ten, username = clean(body.get("ten")), clean(str(body.get("username") or "").lstrip("@"))
+    db.upsert_alert_user(chat_id, ten, username, db.ALERT_APPROVED)
+    db.set_alert_user_links(chat_id, bot_id, person_id)
+    if not ten or not username:  # để trống → lấy tên / @username từ Telegram (được khi họ đã bấm Start bot)
+        p = await tg_profile(chat_id)
+        db.upsert_alert_user(chat_id, ten or p.get("ten"), username or p.get("username"), db.ALERT_APPROVED)
     return {"ok": True}
+
+
+@app.post("/api/alert-bot/recipients/{chat_id}/profile")
+async def refresh_alert_recipient(chat_id: int):
+    """🔄 Lấy lại tên + @username Telegram (getChat) của 1 người nhận."""
+    old = db.get_alert_user(chat_id)
+    if not old:
+        raise HTTPException(404, "Không có người nhận này")
+    p = await tg_profile(chat_id)
+    if not p:
+        raise ValueError("Telegram không trả thông tin – người này cần mở bot của mình và bấm Start trước")
+    db.upsert_alert_user(chat_id, p.get("ten"), p.get("username"), old["trang_thai"])
+    return {"ok": True, **p}
 
 
 @app.patch("/api/alert-bot/recipients/{chat_id}")
 async def update_alert_recipient(chat_id: int, request: Request):
-    """Sửa tên / username, bật (da_duyet) / tắt (tu_choi) nhận tin."""
+    """Sửa tên / username / bot gửi, bật (da_duyet) / tắt (tu_choi) nhận tin."""
     old = db.get_alert_user(chat_id)
     if not old:
         raise HTTPException(404, "Không có người nhận này")
     body = await request.json()
     status = old["trang_thai"] if "active" not in body else (
         db.ALERT_APPROVED if body["active"] in (1, True, "1", "true") else db.ALERT_REJECTED)
+    bot_id = parse_bot_id(body["bot_id"]) if "bot_id" in body else old["bot_id"]
+    person_id = parse_person_id(body["nguoi_dat_id"]) if "nguoi_dat_id" in body else old["nguoi_dat_id"]
     with db.connect() as conn:  # sửa thẳng (upsert_alert_user giữ tên cũ khi tên mới rỗng)
-        conn.execute("UPDATE alert_users SET ten = ?, username = ?, trang_thai = ?, updated_at = ? WHERE chat_id = ?",
+        conn.execute("UPDATE alert_users SET ten = ?, username = ?, trang_thai = ?, bot_id = ?, nguoi_dat_id = ?, "
+                     "updated_at = ? WHERE chat_id = ?",
                      (clean(body["ten"]) if "ten" in body else old["ten"],
                       clean(str(body.get("username") or "").lstrip("@")) if "username" in body else old["username"],
-                      status, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), chat_id))
+                      status, bot_id, person_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), chat_id))
     return {"ok": True}
 
 
@@ -473,11 +578,12 @@ def delete_alert_recipient(chat_id: int):
 
 @app.post("/api/alert-bot/test")
 async def test_alert(request: Request):
-    """Gửi 1 tin thử tới 1 telegram_id bằng bot alert đang dùng (báo lỗi rõ: chưa bấm Start, sai id…)."""
+    """Gửi 1 tin thử tới 1 telegram_id bằng đúng bot người đó được gán (báo lỗi rõ: chưa bấm Start, sai id…)."""
     chat_id = parse_chat_id((await request.json()).get("chat_id"))
-    token = shipwatch._alert_token()[0]
-    if not token:
+    targets = shipwatch._alert_targets([chat_id])
+    if not targets:
         raise ValueError("Chưa có token bot alert")
+    token = targets[0][1]
     try:
         await shipwatch.tg(token, "sendMessage", chat_id=chat_id,
                            text=f"✅ Tin thử từ web Quản lí đơn ({request.state.user['username']}): "
@@ -1073,8 +1179,16 @@ async def track(rec_id: int, saved: int = 0):
     r = db.get("orders", rec_id)
     if not r or not r["ma_don"]:
         raise HTTPException(404, "Đơn chưa có mã vận đơn")
+    key = tracking.log_key(r["ma_don"])
+    cooldown = 0.0
+    if not saved and key and TRACK_COOLDOWN_MINUTES > 0:
+        # chống bấm liên tục: mỗi mã chỉ gọi hãng 1 lần / TRACK_COOLDOWN_MINUTES phút, trong lúc đó trả bản vừa lưu
+        cooldown = await asyncio.to_thread(db.take_cooldown, f"trackcd:{key}", TRACK_COOLDOWN_MINUTES * 60)
+        saved = int(cooldown > 0)
     if saved:
-        row = db.get_track_log(tracking.log_key(r["ma_don"]))
+        row = db.get_track_log(key)
+        if cooldown and not row:
+            raise ValueError(f"Mã này vừa được tra – thử lại sau {max(round(cooldown / 60), 1)} phút")
         if row:
             res = tracking.result_from_dict(json.loads(row["data"]))
             res.saved_at = row["updated_at"] or ""
@@ -1083,8 +1197,16 @@ async def track(rec_id: int, saved: int = 0):
         res.web_url = res.web_url or tracking.site_url(r["ma_don"], r["don_vi_vc"])
         ghn = tracking.is_ghn(r["ma_don"], r["don_vi_vc"])
         return {**_track_out(res), "final": bool(row and row["final"]), "from_db": True, "ghn": ghn,
-                "api_track": tracking.is_supported(r["ma_don"], r["don_vi_vc"]) and not ghn}
-    res = await tracking.track_saved(r["ma_don"], r["don_vi_vc"], r["sdt"])
+                "api_track": tracking.is_supported(r["ma_don"], r["don_vi_vc"]) and not ghn,
+                "cooldown": round(cooldown)}
+    try:
+        res = await tracking.track_saved(r["ma_don"], r["don_vi_vc"], r["sdt"])
+    except BaseException:
+        if key:
+            db.release_cooldown(f"trackcd:{key}")
+        raise
+    if not res.ok and key:  # tra lỗi → nhả khóa, bấm lại được ngay
+        db.release_cooldown(f"trackcd:{key}")
     tracking.relevel_order(r, res)  # cờ sắp giao + kéo giờ tra của bot lên sớm (alert vẫn do bot gửi)
     return _track_out(tracking.with_saved_fallback(res))
 
