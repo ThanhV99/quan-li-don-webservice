@@ -2768,7 +2768,7 @@ function botStatus(b) {
 }
 const botLink = u => u ? `<a href="https://t.me/${esc(u)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">@${esc(u)}</a>` : "";
 const botLabel = b => b.ten || (b.username ? "@" + b.username : `Bot #${b.id}`);
-const rcptChip = r => `<span class="badge ${r.trang_thai === "da_duyet" ? "b-muted" : "b-cancel"}" title="${r.trang_thai === "da_duyet" ? "đang nhận" : "đã tắt"}">${esc(r.ten || r.chat_id)}</span>`;
+const rcptChip = r => `<span class="badge ${r.trang_thai === "da_duyet" ? "b-muted" : "b-cancel"}" title="${r.trang_thai === "da_duyet" ? "đang nhận" : "đã tắt"}">${esc(r.ten || "?")} · <code>${r.chat_id}</code></span>`;
 async function viewAlertBot() {
   const c = await api("/alert-bot?check=1");
   state.alertBot = c;
@@ -2786,23 +2786,23 @@ async function viewAlertBot() {
     <div class="toolbar"><b>🤖 Bảng bot</b><span class="meta">dán token, tên bot tự lấy từ Telegram</span><span class="grow"></span>
       <button class="btn primary" onclick="alertBotForm()">＋ Thêm bot</button></div>
     <div class="card" style="margin-bottom:8px"><table style="min-width:760px">
-      <tr><th>Tên bot</th><th>Username</th><th>Token</th><th>Trạng thái</th><th>Người nhận qua bot này</th></tr>
+      <tr><th>Tên bot</th><th>Người nhận qua bot này</th><th>Username</th><th>Token</th><th>Trạng thái</th></tr>
       ${c.bots.map(b => `<tr class="click" onclick="alertBotForm(${b.id})">
         <td><b>${esc(b.ten || "")}</b> ${b.mac_dinh ? '<span class="badge b-accent">⭐ mặc định</span>'
           : `<button class="btn sm" title="Người nhận chưa chọn bot + admin trong .env nhận qua bot mặc định" onclick="event.stopPropagation();setDefaultBot(${b.id})">☆ Đặt mặc định</button>`}</td>
+        <td><div class="meta">${byBot(b.id).length} người</div>${chips(byBot(b.id))}${b.mac_dinh ? admins : ""}</td>
         <td>${botLink(b.username)}</td>
         <td style="white-space:nowrap"><code id="tok-${b.id}">${esc(b.masked)}</code>
           <button class="btn sm" title="Hiện / ẩn token" onclick="event.stopPropagation();toggleToken(${b.id})">👁</button>
           <button class="btn sm" title="Chép token" onclick="event.stopPropagation();copyToken(${b.id})">📋</button></td>
-        <td>${botStatus(b.bot)}</td>
-        <td>${chips(byBot(b.id))}${b.mac_dinh ? admins : ""}</td></tr>`).join("")}
+        <td>${botStatus(b.bot)}</td></tr>`).join("")}
       ${c.bots.length ? "" : e.source ? `<tr>
         <td><b>${esc(e.bot?.name || "")}</b> <span class="badge b-muted">dự phòng .env</span><div class="meta">${TOKEN_SOURCES[e.source]}</div>
           <button class="btn sm primary" style="margin-top:4px" onclick="importEnvBot()">📥 Chuyển vào bảng</button></td>
+        <td><div class="meta">${c.recipients.length} người</div>${chips(c.recipients)}${admins}</td>
         <td>${botLink(e.bot?.username)}</td>
         <td><code>${esc(e.masked)}</code></td>
-        <td>${botStatus(e.bot)}</td>
-        <td>${chips(c.recipients)}${admins}</td></tr>`
+        <td>${botStatus(e.bot)}</td></tr>`
         : '<tr><td colspan="5" class="muted">Chưa có bot – bấm ＋ Thêm bot và dán token từ @BotFather</td></tr>'}
     </table></div>
     <div class="meta" style="margin-bottom:16px">Người nhận phải mở đúng bot của mình và bấm <b>Start</b> một lần thì bot mới nhắn được.
@@ -2810,20 +2810,30 @@ async function viewAlertBot() {
     <div class="toolbar"><b>📨 Bảng người nhận</b><span class="meta">${on}/${c.recipients.length} đang nhận alert</span><span class="grow"></span>
       <button class="btn primary" onclick="alertRcptForm()">＋ Thêm người nhận</button></div>
     <div class="card"><table style="min-width:860px">
-      <tr><th>Tên Telegram</th><th>Telegram ID</th><th>Username</th><th>Bot gửi</th><th>Người đặt</th><th>Nhận alert</th><th></th></tr>
+      <tr><th>Tên Telegram</th><th>Telegram ID</th><th>🤖 Bot gửi</th><th>Username</th><th>Người đặt</th><th>Nhận alert</th><th></th></tr>
       ${c.recipients.length ? c.recipients.map(r => {
-        const b = bots[r.bot_id], p = people[r.nguoi_dat_id];
+        const b = bots[r.bot_id] || def, p = people[r.nguoi_dat_id];
+        // chọn bot ngay trong bảng (đổi là lưu); chưa chọn = bot ⭐ mặc định
+        const sel = c.bots.length ? `<select class="input" style="padding:4px 6px;max-width:220px" onclick="event.stopPropagation()"
+            onchange="setRcptBot(${r.chat_id}, this.value)">
+            ${[["", `⭐ Mặc định${def ? ` – ${botLabel(def)}` : ""}`], ...c.bots.map(x => [x.id, botLabel(x) + (x.username ? ` (@${x.username})` : "")])]
+              .map(([v, l]) => `<option value="${v}" ${String(bots[r.bot_id] ? r.bot_id : "") === String(v) ? "selected" : ""}>${esc(l)}</option>`).join("")}
+          </select>` : '<span class="muted">bot dự phòng .env</span>';
         return `<tr class="click" onclick="alertRcptForm(${r.chat_id})">
         <td><b>${esc(r.ten || "")}</b></td>
         <td><code>${r.chat_id}</code></td>
+        <td>${sel}${b?.username ? `<div class="meta">gửi qua ${botLink(b.username)}</div>` : ""}</td>
         <td>${r.username ? `<a href="https://t.me/${esc(r.username)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">@${esc(r.username)}</a>` : ""}</td>
-        <td>${b ? esc(botLabel(b)) : '<span class="muted">⭐ mặc định</span>'}</td>
         <td>${p ? `<a href="/nguoi-dat" onclick="event.stopPropagation();event.preventDefault();openPersonProfile(${p.id})">👤 ${esc(p.ten)}</a>` : '<span class="muted">—</span>'}</td>
         <td>${r.trang_thai === "da_duyet" ? '<span class="badge b-done">● đang nhận</span>'
               : r.trang_thai === "cho_duyet" ? '<span class="badge b-muted">⏳ chờ duyệt</span>' : '<span class="badge b-cancel">⏸ tắt</span>'}</td>
         <td style="white-space:nowrap"><button class="btn sm" onclick="event.stopPropagation();testAlert(${r.chat_id})">📨 Gửi thử</button></td></tr>`;
       }).join("") : '<tr><td colspan="7" class="muted">Chưa có ai – bấm ＋ Thêm người nhận</td></tr>'}
     </table></div>`;
+}
+async function setRcptBot(chatId, botId) {
+  try { await patch(`/alert-bot/recipients/${chatId}`, {bot_id: botId}); toast("🤖 Đã đổi bot gửi"); }
+  finally { viewAlertBot(); }
 }
 // mở hồ sơ người đặt (form của tab 👤 Người đặt) ngay trên tab Bot alert
 async function openPersonProfile(id) {
