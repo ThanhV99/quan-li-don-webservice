@@ -2191,6 +2191,21 @@ async function viewProducts() {
   const {products: list, orphans} = await api("/products");
   state.products = Object.fromEntries(list.map(p => [p.id, p]));
   state.sales = Object.fromEntries([...list, ...orphans].flatMap(p => p.sales).map(s => [s.id, s]));
+  state.productData = {list, orphans};
+  $("#view").innerHTML = `<div class="toolbar">
+      <input class="input grow" id="productQ" type="search" placeholder="🔍 Tìm tên sản phẩm…" value="${esc(state.productQ || "")}"
+        oninput="clearTimeout(this._t);this._t=setTimeout(()=>{state.productQ=this.value;renderProducts()},200)">
+      <span class="meta" id="productCount"></span></div>
+    <div id="productList"></div>
+    <button class="btn primary fab" onclick="productForm()">＋ Thêm sản phẩm</button>`;
+  renderProducts();
+}
+// lọc theo tên (mọi từ gõ vào đều phải có trong tên; không phân biệt hoa thường / có dấu – không dấu)
+function renderProducts() {
+  const {list: all, orphans: allOrphans} = state.productData;
+  const words = foldText(state.productQ || "").split(/\s+/).filter(Boolean);
+  const hit = name => words.every(w => foldText(name).includes(w));
+  const list = all.filter(p => hit(p.ten)), orphans = allOrphans.filter(o => hit(o.ten_sp));
   const card = p => `<div class="card product">
       <div class="head" style="flex-wrap:wrap;gap:6px">
         <b>${esc(p.ten)}</b>
@@ -2213,12 +2228,13 @@ async function viewProducts() {
   const groups = [["🔥 Đang sale", 0], ["⛔ Hết sale", 1], ["Chưa có shop sale", 2]]
     .map(([title, r]) => [title, sorted.filter(p => rank(p) === r)]).filter(([, ps]) => ps.length);
   orphans.sort((a, b) => prio(a) - prio(b) || nActive(b) - nActive(a));
-  $("#view").innerHTML = `
+  $("#productCount").textContent = words.length ? `${list.length + orphans.length}/${all.length + allOrphans.length} sản phẩm` : "";
+  $("#productList").innerHTML = `
     ${groups.map(([title, ps]) => `<div class="section-title">${title} · ${ps.length}</div>
-      <div class="grid cards">${ps.map(card).join("")}</div>`).join("") || '<div class="empty">Chưa có sản phẩm</div>'}
+      <div class="grid cards">${ps.map(card).join("")}</div>`).join("")
+      || (orphans.length ? "" : `<div class="empty">${words.length ? `Không có sản phẩm nào tên khớp “${esc(state.productQ.trim())}”` : "Chưa có sản phẩm"}</div>`)}
     ${orphans.length ? `<div class="section-title">Món sale chưa có trong danh mục sản phẩm</div>
-      <div class="grid cards">${orphans.map(o => card({ten: o.ten_sp, sales: o.sales, images: o.images})).join("")}</div>` : ""}
-    <button class="btn primary fab" onclick="productForm()">＋ Thêm sản phẩm</button>`;
+      <div class="grid cards">${orphans.map(o => card({ten: o.ten_sp, sales: o.sales, images: o.images})).join("")}</div>` : ""}`;
 }
 // ảnh sản phẩm: lưu theo tên (dùng chung cho món sale cùng tên), bot /sale gửi kèm thành album (tối đa 10 ảnh)
 const MAX_PRODUCT_IMAGES = 10;
