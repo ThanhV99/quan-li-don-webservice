@@ -2760,15 +2760,15 @@ async function deleteUser(id) {
 }
 
 // ---------- bot alert Telegram (admin): bảng 1 = các bot (token, tên tự lấy), bảng 2 = người nhận ----------
-// người nhận: tên + @username Telegram (tự lấy khi để trống), Telegram ID, bot gửi cho họ, hồ sơ người đặt gắn với họ
-const TOKEN_SOURCES = {env: "ALERT_BOT_TOKEN trong .env", main: "bot chính (BOT_TOKEN trong .env)", "": "chưa có"};
+// người nhận: tên + @username Telegram (tự lấy khi để trống), Telegram ID, bot gửi cho họ, hồ sơ người đặt, 👑 admin.
+// Tất cả nhập ở đây – không đọc .env.
 function botStatus(b) {
   if (!b) return "";
   return b.ok ? '<span class="badge b-done">● hoạt động</span>' : `<span class="badge b-cancel" title="${esc(b.error)}">⚠️ token lỗi</span>`;
 }
 const botLink = u => u ? `<a href="https://t.me/${esc(u)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">@${esc(u)}</a>` : "";
 const botLabel = b => b.ten || (b.username ? "@" + b.username : `Bot #${b.id}`);
-const rcptChip = r => `<span class="badge ${r.admin || r.trang_thai === "da_duyet" ? "b-muted" : "b-cancel"}" title="${r.admin ? "admin (.env) – luôn nhận" : r.trang_thai === "da_duyet" ? "đang nhận" : "đã tắt"}">${r.admin ? "👑 " : ""}${esc(r.ten || (r.admin ? "admin" : "?"))} · <code>${r.chat_id}</code></span>`;
+const rcptChip = r => `<span class="badge ${r.trang_thai === "da_duyet" ? "b-muted" : "b-cancel"}" title="${r.trang_thai === "da_duyet" ? "đang nhận" : "đã tắt"}">${r.la_admin ? "👑 " : ""}${esc(r.ten || "?")} · <code>${r.chat_id}</code></span>`;
 async function viewAlertBot() {
   const c = await api("/alert-bot?check=1");
   state.alertBot = c;
@@ -2776,18 +2776,11 @@ async function viewAlertBot() {
   const bots = Object.fromEntries(c.bots.map(b => [b.id, b]));
   const people = Object.fromEntries(c.people.map(p => [p.id, p]));
   const def = c.bots.find(b => b.mac_dinh);  // người nhận chưa chọn bot → bot ⭐ mặc định
-  // admin trong ALLOWED_USER_IDS / ALERT_CHAT_IDS luôn nhận (kể cả tin đơn hủy / hoàn): chưa có trong bảng thì vẫn hiện
-  // 1 dòng (envOnly, nhận qua bot ⭐ mặc định); chọn bot / gắn người đặt cho họ = thêm họ vào bảng
-  const admin = new Set(c.env_admins.map(String));
-  const rows = [...c.recipients, ...c.env_admins.filter(id => !state.alertRcpt[id])
-    .map(id => ({chat_id: id, ten: "", trang_thai: "da_duyet", bot_id: null, envOnly: true}))];
-  rows.forEach(r => r.admin = admin.has(String(r.chat_id)));
+  const rows = c.recipients;
   const byBot = id => rows.filter(r => (bots[r.bot_id] ? r.bot_id : def?.id) === id);
   const chips = list => list.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px">${list.map(rcptChip).join("")}</div>` : '<span class="muted">—</span>';
-  const e = c.env;
-  const on = rows.filter(r => r.admin || r.trang_thai === "da_duyet").length;
-  const botLinks = c.bots.filter(b => b.username).map(b => botLink(b.username) + (b.mac_dinh ? " (⭐ mặc định)" : "")).join(", ")
-    || (e.bot?.username ? botLink(e.bot.username) : "bot alert");
+  const on = rows.filter(r => r.trang_thai === "da_duyet").length;
+  const botLinks = c.bots.filter(b => b.username).map(b => botLink(b.username) + (b.mac_dinh ? " (⭐ mặc định)" : "")).join(", ") || "bot alert";
   let guideOpen = true; try { guideOpen = localStorage.getItem("qld_alert_guide") !== "0"; } catch {}
   $("#view").innerHTML = `
     <details class="card" style="margin-bottom:14px" ${guideOpen ? "open" : ""}
@@ -2804,64 +2797,52 @@ async function viewAlertBot() {
           Báo lỗi <code>chat not found</code> / <code>bot was blocked</code> = người đó chưa bấm Start đúng bot (hoặc đã chặn bot).</li>
       </ol>
       <div class="meta" style="margin-top:8px">Bot tự gửi khi đơn ⏳ Đã đặt sắp giao / đang giao / có mốc giao mới (giao thành công, thất bại, hẹn lại…).
-        Tin đơn bị hủy / hoàn chỉ gửi admin trong .env. Muốn tạm ngưng nhận: bấm vào người đó → Nhận alert: ⏸ Tắt.
+        Tin đơn bị hủy / hoàn chỉ gửi người nhận 👑 admin. Muốn tạm ngưng nhận: bấm vào người đó → Nhận alert: ⏸ Tắt.
         Nhận vào nhóm: thêm bot vào nhóm rồi dùng ID nhóm (số âm, bắt đầu <code>-100</code>).</div>
     </details>
     <div class="toolbar"><b>🤖 Bảng bot</b><span class="meta">dán token, tên bot tự lấy từ Telegram</span><span class="grow"></span>
       <button class="btn primary" onclick="alertBotForm()">＋ Thêm bot</button></div>
-    <div class="card" style="margin-bottom:8px"><table style="min-width:760px">
+    <div class="card" style="margin-bottom:16px"><table style="min-width:760px">
       <tr><th>Tên bot</th><th>Người nhận qua bot này</th><th>Username</th><th>Token</th><th>Trạng thái</th></tr>
-      ${c.bots.map(b => `<tr class="click" onclick="alertBotForm(${b.id})">
+      ${c.bots.length ? c.bots.map(b => `<tr class="click" onclick="alertBotForm(${b.id})">
         <td><b>${esc(b.ten || "")}</b> ${b.mac_dinh ? '<span class="badge b-accent">⭐ mặc định</span>'
-          : `<button class="btn sm" title="Người nhận chưa chọn bot + admin trong .env nhận qua bot mặc định" onclick="event.stopPropagation();setDefaultBot(${b.id})">☆ Đặt mặc định</button>`}</td>
+          : `<button class="btn sm" title="Người nhận chưa chọn bot nhận qua bot mặc định" onclick="event.stopPropagation();setDefaultBot(${b.id})">☆ Đặt mặc định</button>`}</td>
         <td><div class="meta">${byBot(b.id).length} người</div>${chips(byBot(b.id))}</td>
         <td>${botLink(b.username)}</td>
         <td style="white-space:nowrap"><code id="tok-${b.id}">${esc(b.masked)}</code>
           <button class="btn sm" title="Hiện / ẩn token" onclick="event.stopPropagation();toggleToken(${b.id})">👁</button>
           <button class="btn sm" title="Chép token" onclick="event.stopPropagation();copyToken(${b.id})">📋</button></td>
-        <td>${botStatus(b.bot)}</td></tr>`).join("")}
-      ${c.bots.length ? "" : e.source ? `<tr>
-        <td><b>${esc(e.bot?.name || "")}</b> <span class="badge b-muted">dự phòng .env</span><div class="meta">${TOKEN_SOURCES[e.source]}</div>
-          <button class="btn sm primary" style="margin-top:4px" onclick="importEnvBot()">📥 Chuyển vào bảng</button></td>
-        <td><div class="meta">${rows.length} người</div>${chips(rows)}</td>
-        <td>${botLink(e.bot?.username)}</td>
-        <td><code>${esc(e.masked)}</code></td>
-        <td>${botStatus(e.bot)}</td></tr>`
-        : '<tr><td colspan="5" class="muted">Chưa có bot – bấm ＋ Thêm bot và dán token từ @BotFather</td></tr>'}
+        <td>${botStatus(b.bot)}</td></tr>`).join("")
+        : '<tr><td colspan="5" class="muted">Chưa có bot – bấm ＋ Thêm bot và dán token từ @BotFather (chưa có bot thì không gửi được alert)</td></tr>'}
     </table></div>
-    <div style="margin-bottom:16px"></div>
-    <div class="toolbar"><b>📨 Bảng người nhận</b><span class="meta">${on}/${rows.length} đang nhận alert · 👑 = admin trong ALLOWED_USER_IDS / ALERT_CHAT_IDS (luôn nhận, kể cả tin đơn hủy / hoàn)</span><span class="grow"></span>
+    <div class="toolbar"><b>📨 Bảng người nhận</b><span class="meta">${on}/${rows.length} đang nhận alert · 👑 admin = nhận thêm tin đơn hủy / hoàn</span><span class="grow"></span>
       <button class="btn primary" onclick="alertRcptForm()">＋ Thêm người nhận</button></div>
-    <div class="card"><table style="min-width:860px">
-      <tr><th>Tên Telegram</th><th>Telegram ID</th><th>🤖 Bot gửi</th><th>Username</th><th>Người đặt</th><th>Nhận alert</th><th></th></tr>
+    <div class="card"><table style="min-width:900px">
+      <tr><th>Tên Telegram</th><th>Telegram ID</th><th>🤖 Bot gửi</th><th>Username</th><th>Người đặt</th><th>👑 Admin</th><th>Nhận alert</th><th></th></tr>
       ${rows.length ? rows.map(r => {
         const b = bots[r.bot_id] || def, p = people[r.nguoi_dat_id];
         // chọn bot ngay trong bảng (đổi là lưu); chưa chọn = bot ⭐ mặc định
         const sel = c.bots.length ? `<select class="input" style="padding:4px 6px;max-width:220px" onclick="event.stopPropagation()"
-            onchange="setRcptBot(${r.chat_id}, this.value, ${!!r.envOnly})">
+            onchange="setRcpt(${r.chat_id}, {bot_id: this.value})">
             ${[["", `⭐ Mặc định${def ? ` – ${botLabel(def)}` : ""}`], ...c.bots.map(x => [x.id, botLabel(x) + (x.username ? ` (@${x.username})` : "")])]
               .map(([v, l]) => `<option value="${v}" ${String(bots[r.bot_id] ? r.bot_id : "") === String(v) ? "selected" : ""}>${esc(l)}</option>`).join("")}
-          </select>` : '<span class="muted">bot dự phòng .env</span>';
-        return `<tr class="click" onclick="alertRcptForm(${r.envOnly ? `0, ${r.chat_id}` : r.chat_id})">
-        <td>${r.admin ? '<span class="badge b-accent" title="admin trong ALLOWED_USER_IDS / ALERT_CHAT_IDS">👑 admin</span> ' : ""}<b>${esc(r.ten || "")}</b>
-          ${r.envOnly ? '<div class="meta">chỉ có trong biến môi trường – bấm để thêm vào bảng (chọn bot, gắn người đặt)</div>' : ""}</td>
+          </select>` : '<span class="muted">chưa có bot</span>';
+        return `<tr class="click" onclick="alertRcptForm(${r.chat_id})">
+        <td><b>${esc(r.ten || "")}</b></td>
         <td><code>${r.chat_id}</code></td>
         <td>${sel}${b?.username ? `<div class="meta">gửi qua ${botLink(b.username)}</div>` : ""}</td>
         <td>${r.username ? `<a href="https://t.me/${esc(r.username)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">@${esc(r.username)}</a>` : ""}</td>
         <td>${p ? `<a href="/nguoi-dat" onclick="event.stopPropagation();event.preventDefault();openPersonProfile(${p.id})">👤 ${esc(p.ten)}</a>` : '<span class="muted">—</span>'}</td>
-        <td>${r.admin ? '<span class="badge b-done" title="admin luôn nhận, nút ⏸ Tắt không áp dụng">● luôn nhận</span>'
-              : r.trang_thai === "da_duyet" ? '<span class="badge b-done">● đang nhận</span>'
+        <td><label onclick="event.stopPropagation()" title="Nhận thêm tin đơn hủy / hoàn" style="cursor:pointer">
+          <input type="checkbox" ${r.la_admin ? "checked" : ""} onchange="setRcpt(${r.chat_id}, {la_admin: this.checked ? 1 : 0})"> 👑</label></td>
+        <td>${r.trang_thai === "da_duyet" ? '<span class="badge b-done">● đang nhận</span>'
               : r.trang_thai === "cho_duyet" ? '<span class="badge b-muted">⏳ chờ duyệt</span>' : '<span class="badge b-cancel">⏸ tắt</span>'}</td>
         <td style="white-space:nowrap"><button class="btn sm" onclick="event.stopPropagation();testAlert(${r.chat_id})">📨 Gửi thử</button></td></tr>`;
-      }).join("") : '<tr><td colspan="7" class="muted">Chưa có ai – bấm ＋ Thêm người nhận</td></tr>'}
+      }).join("") : '<tr><td colspan="8" class="muted">Chưa có ai – bấm ＋ Thêm người nhận</td></tr>'}
     </table></div>`;
 }
-async function setRcptBot(chatId, botId, isNew) {  // isNew: admin chỉ có trong .env → thêm vào bảng luôn
-  try {
-    if (isNew) await post("/alert-bot/recipients", {chat_id: chatId, bot_id: botId});
-    else await patch(`/alert-bot/recipients/${chatId}`, {bot_id: botId});
-    toast("🤖 Đã đổi bot gửi");
-  }
+async function setRcpt(chatId, body) {  // sửa ngay trong bảng (bot gửi / 👑 admin)
+  try { await patch(`/alert-bot/recipients/${chatId}`, body); toast("✏️ Đã lưu"); }
   finally { viewAlertBot(); }
 }
 // mở hồ sơ người đặt (form của tab 👤 Người đặt) ngay trên tab Bot alert
@@ -2877,10 +2858,6 @@ async function toggleToken(id) {
 async function copyToken(id) { copyText((await api(`/alert-bot/bots/${id}/token`)).token); }
 async function setDefaultBot(id) {
   await post(`/alert-bot/bots/${id}/default`); toast("⭐ Đã đặt làm bot mặc định"); viewAlertBot();
-}
-async function importEnvBot() {  // token dự phòng trong .env → bảng (từ đó sửa trên web)
-  const r = await post("/alert-bot/import-env");
-  toast(`📥 Đã chuyển bot ${r.bot?.name || ""} vào bảng – từ giờ sửa token ngay trên web`); viewAlertBot();
 }
 function alertBotForm(id) {
   const b = id ? state.alertBot.bots.find(x => x.id === id) : null;
@@ -2907,17 +2884,18 @@ async function deleteAlertBot(id) {
   if (!confirm(`Xóa bot “${botLabel(b)}”? Người nhận đang dùng bot này sẽ nhận qua bot ⭐ mặc định.`)) return;
   await del(`/alert-bot/bots/${id}`); toast("🗑 Đã xóa bot"); closeModal(); viewAlertBot();
 }
-function alertRcptForm(chatId, presetId) {  // presetId: thêm admin chỉ có trong .env vào bảng (điền sẵn ID)
+function alertRcptForm(chatId) {
   const r = chatId ? state.alertRcpt[chatId] : null, c = state.alertBot;
   const bots = [["", "⭐ Bot mặc định"], ...c.bots.map(b => [b.id, botLabel(b) + (b.username ? ` (@${b.username})` : "")])];
   const people = [["", "— không gắn —"], ...c.people.map(p => [p.id, p.ten + (p.sdt ? ` · ${p.sdt}` : "")])];
-  openModal(`${modalHead(r ? `📨 ${esc(r.ten || r.chat_id)}` : presetId ? `👑 Thêm admin ${presetId} vào bảng` : "＋ Thêm người nhận alert")}
+  openModal(`${modalHead(r ? `📨 ${esc(r.ten || r.chat_id)}` : "＋ Thêm người nhận alert")}
     <div class="form">
-      ${r ? `<label>Telegram ID<input class="input" value="${r.chat_id}" disabled></label>` : field(["chat_id", "Telegram ID", "num", presetId || "", {ph: "vd 123456789"}])}
+      ${r ? `<label>Telegram ID<input class="input" value="${r.chat_id}" disabled></label>` : field(["chat_id", "Telegram ID", "num", "", {ph: "vd 123456789"}])}
       ${field(["ten", "Tên Telegram", "text", r?.ten || "", {ph: "để trống = tự lấy từ Telegram"}])}
       ${field(["username", "Username Telegram", "text", r?.username || "", {ph: "để trống = tự lấy từ Telegram"}])}
       ${field(["bot_id", "Nhận qua bot", "select", r?.bot_id || (c.bots.length === 1 ? c.bots[0].id : ""), {options: bots}])}
       ${field(["nguoi_dat_id", "Hồ sơ người đặt", "select", r?.nguoi_dat_id || "", {options: people}])}
+      ${field(["la_admin", "Vai trò", "select", r?.la_admin ? "1" : "0", {options: [["0", "Người nhận"], ["1", "👑 Admin – nhận thêm tin đơn hủy / hoàn"]]}])}
       ${r ? field(["active", "Nhận alert", "select", r.trang_thai === "da_duyet" ? "1" : "0", {options: [["1", "● Đang nhận"], ["0", "⏸ Tắt"]]}]) : ""}
     </div>
     <div class="meta" style="margin-top:8px">Tên / username chỉ tự lấy được khi người này đã mở bot của mình và bấm Start.</div>
@@ -2938,7 +2916,7 @@ async function refreshRcptProfile(chatId) {
 async function saveAlertRcpt(chatId) {
   const f = formData();
   if (chatId) await patch(`/alert-bot/recipients/${chatId}`, {ten: f.ten, username: f.username, bot_id: f.bot_id,
-                                                                nguoi_dat_id: f.nguoi_dat_id, active: f.active === "1"});
+                                                                nguoi_dat_id: f.nguoi_dat_id, la_admin: f.la_admin, active: f.active === "1"});
   else await post("/alert-bot/recipients", f);
   toast(chatId ? "✏️ Đã lưu" : "➕ Đã thêm – bấm 📨 Gửi thử để kiểm tra"); closeModal(); viewAlertBot();
 }

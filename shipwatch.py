@@ -12,9 +12,9 @@ trong FIRST_CHECK_MINUTES. Giờ hẹn + chữ ký mốc đã báo (vc_alert_las
 Một lúc chỉ 1 lượt chạy (db.take_lease) → không báo trùng khi cron và lệnh bot chạy cùng lúc.
 
 Chỉ GỬI tin (người dùng chọn 23/11/2026: bot Telegram không cần chạy / lắng nghe liên tục nữa): sendMessage của
-Bot API tới ALERT_CHAT_IDS (trống thì ALLOWED_USER_IDS) + người đã duyệt trong alert_users. Admin quản lý ở tab
-🤖 Bot alert: bảng các bot (token) + telegram_id người nhận, mỗi người nhận qua bot đã chọn
-(chưa chọn / admin trong .env = ALERT_BOT_TOKEN, trống thì BOT_TOKEN).
+Bot API tới người đang nhận trong alert_users. Mọi thứ nhập ở tab 🤖 Bot alert (không đọc .env): bảng các bot (token,
+⭐ 1 bot mặc định) + telegram_id người nhận, mỗi người nhận qua bot đã chọn (chưa chọn = bot ⭐ mặc định);
+người nhận 👑 admin (la_admin) nhận thêm tin đơn hủy / hoàn.
 Không có nút bấm / deep link bot: link trong tin mở trang đơn trên web
 (PUBLIC_URL/don-hang?don=<id>&tra=1); đơn bị hủy / hoàn → tin cho admin kèm link mở đơn để tự chuyển Đã hủy.
 """
@@ -36,10 +36,6 @@ import track_text
 log = logging.getLogger(__name__)
 
 TRACK_INTERVAL_HOURS = float(os.getenv("TRACK_INTERVAL_HOURS", "12"))
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ALERT_BOT_TOKEN = os.getenv("ALERT_BOT_TOKEN", "")
-ALLOWED_USER_IDS = [int(x) for x in os.getenv("ALLOWED_USER_IDS", "").replace(" ", "").split(",") if x]
-ALERT_CHAT_IDS = [int(x) for x in os.getenv("ALERT_CHAT_IDS", "").replace(" ", "").split(",") if x]
 # địa chỉ web cho link trong tin; Vercel tự có VERCEL_PROJECT_PRODUCTION_URL (tên miền production, không https://)
 PUBLIC_URL = (os.getenv("PUBLIC_URL", "").strip()
               or (f"https://{os.environ['VERCEL_PROJECT_PRODUCTION_URL']}" if os.getenv("VERCEL_PROJECT_PRODUCTION_URL") else "")
@@ -74,39 +70,28 @@ async def tg(token: str, method: str, **payload) -> dict:
     return data["result"]
 
 
-def _env_token() -> tuple[str, str]:
-    """Token dự phòng trong .env: ALERT_BOT_TOKEN ("env") > bot chính BOT_TOKEN ("main")."""
-    if ALERT_BOT_TOKEN:
-        return ALERT_BOT_TOKEN, "env"
-    return (BOT_TOKEN, "main") if BOT_TOKEN else ("", "")
-
-
-def _default_token() -> tuple[str, str]:
-    """(token, nguồn) của bot mặc định – cho admin trong .env và người nhận chưa chọn bot: bot ⭐ mặc định trong
-    bảng alert_bots ("db", admin sửa trên web) > token dự phòng trong .env. Tên bắt đầu "_" → không lộ qua API
-    dịch vụ của bot."""
-    if b := db.default_alert_bot():
-        return b["token"], "db"
-    return _env_token()
+def _default_token() -> str:
+    """Token bot ⭐ mặc định trong bảng alert_bots (người nhận chưa chọn bot). Không đọc .env.
+    Tên bắt đầu "_" → không lộ qua API dịch vụ của bot."""
+    b = db.default_alert_bot()
+    return b["token"] if b else ""
 
 
 def admin_ids() -> list[int]:
-    return list(ALERT_CHAT_IDS or ALLOWED_USER_IDS)
+    """Người nhận 👑 admin (bảng alert_users, đang nhận): nhận thêm tin đơn bị hủy / hoàn."""
+    return [u["chat_id"] for u in db.list_alert_users(db.ALERT_APPROVED) if u["la_admin"]]
 
 
 def alert_recipients() -> list[int]:
-    """Admin + người đã được duyệt trong bảng alert_users."""
-    chats = dict.fromkeys(admin_ids())
-    for u in db.list_alert_users(db.ALERT_APPROVED):
-        chats.setdefault(u["chat_id"])
-    return list(chats)
+    """Người đang nhận alert trong bảng alert_users (admin nhập ở tab 🤖 Bot alert)."""
+    return [u["chat_id"] for u in db.list_alert_users(db.ALERT_APPROVED)]
 
 
 def _alert_targets(chat_ids: list[int] | None = None) -> list[tuple[int, str]]:
     """[(chat_id, token bot gửi)]: người nhận đã chọn bot (tab 🤖 Bot alert) thì gửi bằng bot đó, còn lại bot mặc định."""
     bots = {b["id"]: b["token"] for b in db.list_alert_bots()}
     users = {u["chat_id"]: u for u in db.list_alert_users()}
-    default = _default_token()[0]
+    default = _default_token()
     out = []
     for chat_id in (alert_recipients() if chat_ids is None else chat_ids):
         u = users.get(chat_id)
@@ -119,8 +104,7 @@ async def send_alert(text: str, chat_ids: list[int] | None = None) -> int:
     """Gửi tới mọi người nhận (hoặc chat_ids), mỗi người bằng bot của mình. Trả về số tin gửi được."""
     targets = _alert_targets(chat_ids)
     if not targets:
-        log.warning("Chưa có bot alert (tab Bot alert / ALERT_BOT_TOKEN / BOT_TOKEN) hoặc người nhận "
-                    "(tab Bot alert / ALERT_CHAT_IDS / ALLOWED_USER_IDS) để gửi alert")
+        log.warning("Chưa có bot hoặc người nhận trong tab 🤖 Bot alert để gửi alert")
         return 0
     sent = 0
     for chat_id, token in targets:

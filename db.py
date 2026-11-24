@@ -682,9 +682,22 @@ def _init_db_full():
         alert_cols = table_columns(conn, "alert_users")
         for col, ddl in (("username", "TEXT"), ("trang_thai", "TEXT NOT NULL DEFAULT 'da_duyet'"),
                          ("updated_at", "TEXT"), ("bot_id", "INTEGER"),
-                         ("nguoi_dat_id", "INTEGER")):
+                         ("nguoi_dat_id", "INTEGER"), ("la_admin", "INTEGER NOT NULL DEFAULT 0")):
             if col not in alert_cols:
                 conn.execute(f"ALTER TABLE alert_users ADD COLUMN {col} {ddl}")
+        # bot alert không đọc .env nữa (token + telegram_id admin nhập ở tab 🤖 Bot alert): chép 1 lần cái đang có
+        # trong .env (ALERT_BOT_TOKEN, ALERT_CHAT_IDS – trống thì ALLOWED_USER_IDS) vào bảng để alert không bị ngừng
+        if not conn.execute("SELECT 1 FROM meta WHERE key = 'alert_env_imported'").fetchone():
+            if (token := os.getenv("ALERT_BOT_TOKEN", "").strip()):
+                conn.execute("INSERT INTO alert_bots (token, created_at) VALUES (?, ?) ON CONFLICT DO NOTHING",
+                             (token, _now()))
+                _ensure_default_bot(conn)
+            ids = [x for x in os.getenv("ALERT_CHAT_IDS", "").replace(" ", "").split(",") if x.lstrip("-").isdigit()] \
+                or [x for x in os.getenv("ALLOWED_USER_IDS", "").replace(" ", "").split(",") if x.lstrip("-").isdigit()]
+            for cid in ids:
+                conn.execute("INSERT INTO alert_users (chat_id, trang_thai, la_admin, created_at) VALUES (?, ?, 1, ?) "
+                             "ON CONFLICT(chat_id) DO UPDATE SET la_admin = 1", (int(cid), ALERT_APPROVED, _now()))
+            conn.execute("INSERT INTO meta (key, value) VALUES ('alert_env_imported', ?)", (_now(),))
         # token bot alert trước đây lưu 1 cái trong meta (đè .env cho mọi người nhận) → thành 1 dòng alert_bots,
         # người nhận chưa chọn bot dùng bot đó như trước
         if (old_token := conn.execute("SELECT value FROM meta WHERE key = 'alert_bot_token'").fetchone()):
@@ -1246,8 +1259,10 @@ def upsert_alert_user(chat_id: int, name: str | None, username: str | None = Non
             """INSERT INTO alert_users (chat_id, ten, username, trang_thai, created_by, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(chat_id) DO UPDATE SET
-                   ten = COALESCE(excluded.ten, ten), username = COALESCE(excluded.username, username),
-                   trang_thai = excluded.trang_thai, created_by = COALESCE(excluded.created_by, created_by),
+                   ten = COALESCE(excluded.ten, alert_users.ten),
+                   username = COALESCE(excluded.username, alert_users.username),
+                   trang_thai = excluded.trang_thai,
+                   created_by = COALESCE(excluded.created_by, alert_users.created_by),
                    updated_at = excluded.updated_at""",
             (chat_id, name or None, username or None, status, by, _now(), _now()))
 
@@ -1259,6 +1274,12 @@ def remove_alert_user(chat_id: int):
         if row:
             conn.execute("DELETE FROM alert_users WHERE chat_id = ?", (chat_id,))
         return row
+
+
+def set_alert_user_admin(chat_id: int, admin: bool):
+    """👑 admin: nhận thêm tin đơn bị hủy / hoàn."""
+    with connect() as conn:
+        conn.execute("UPDATE alert_users SET la_admin = ? WHERE chat_id = ?", (int(admin), chat_id))
 
 
 def set_alert_user_links(chat_id: int, bot_id: int | None, person_id: int | None):

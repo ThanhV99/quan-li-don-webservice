@@ -438,6 +438,10 @@ def parse_chat_id(raw) -> int:
     return int(s)
 
 
+def is_on(v) -> bool:
+    return v in (1, True, "1", "true", "on")
+
+
 def parse_bot_id(raw) -> int | None:
     """Bot gửi cho 1 người nhận: ''/0 = bot mặc định (.env)."""
     if raw in (None, "", 0, "0"):
@@ -472,22 +476,16 @@ async def tg_profile(chat_id: int) -> dict:
 
 @app.get("/api/alert-bot")
 async def alert_bot(check: int = 0):
-    """Các bot trong bảng (che token, ⭐ mac_dinh) + người nhận + admin trong .env. Bảng chưa có bot → "env": token
-    dự phòng trong .env (che) để admin bấm chuyển vào bảng.
+    """Các bot trong bảng (che token, ⭐ mac_dinh) + người nhận (👑 la_admin) + danh sách người đặt. Không đọc .env.
     check=1: gọi getMe từng bot xem token còn đúng không (lấy tên + @username, lưu lại nếu đổi)."""
     bots = db.list_alert_bots()
-    token, source = ("", "") if bots else shipwatch._env_token()
-    out = {"env": {"source": source, "masked": mask_token(token) if token else ""},
-           "bots": [{"id": b["id"], "ten": b["ten"], "username": b["username"], "masked": mask_token(b["token"]),
+    out = {"bots": [{"id": b["id"], "ten": b["ten"], "username": b["username"], "masked": mask_token(b["token"]),
                      "mac_dinh": bool(b["mac_dinh"]), "created_at": b["created_at"]} for b in bots],
-           "env_admins": shipwatch.admin_ids(),
            "recipients": [dict(r) for r in db.list_alert_users()]}
     with db.connect() as conn:  # chọn hồ sơ người đặt cho người nhận
         out["people"] = [dict(p) for p in conn.execute("SELECT id, ten, sdt FROM nguoi_dat ORDER BY ten_key")]
     if check:
-        infos = list(await asyncio.gather(*(bot_info(t) for t in ([token] if token else []) + [b["token"] for b in bots])))
-        if token:
-            out["env"]["bot"] = infos.pop(0)
+        infos = await asyncio.gather(*(bot_info(b["token"]) for b in bots))
         for b, row, info in zip(out["bots"], bots, infos):
             b["bot"] = info
             if info["ok"] and (info["username"] != row["username"] or info["name"] != row["ten"]):
@@ -529,24 +527,11 @@ async def update_alert_bot(bot_id: int, request: Request):
 
 @app.post("/api/alert-bot/bots/{bot_id}/default")
 def default_alert_bot(bot_id: int):
-    """⭐ Đặt làm bot mặc định (người nhận chưa chọn bot + admin trong .env nhận qua bot này)."""
+    """⭐ Đặt làm bot mặc định (người nhận chưa chọn bot nhận qua bot này)."""
     if not db.get_alert_bot(bot_id):
         raise HTTPException(404, "Không có bot này")
     db.set_default_alert_bot(bot_id)
     return {"ok": True}
-
-
-@app.post("/api/alert-bot/import-env")
-async def import_env_bot():
-    """📥 Chép token dự phòng trong .env (ALERT_BOT_TOKEN, trống thì BOT_TOKEN) vào bảng → từ đó sửa trên web."""
-    token, _ = shipwatch._env_token()
-    if not token:
-        raise ValueError("Trong .env không có token bot")
-    if db.find_alert_bot(token):
-        raise ValueError("Bot này đã có trong bảng")
-    token, info = await checked_token(token)
-    bot_id = db.add_alert_bot(token, info.get("name"), info.get("username"))
-    return {"ok": True, "id": bot_id, "bot": info}
 
 
 @app.delete("/api/alert-bot/bots/{bot_id}")
@@ -566,6 +551,7 @@ async def add_alert_recipient(request: Request):
     ten, username = clean(body.get("ten")), clean(str(body.get("username") or "").lstrip("@"))
     db.upsert_alert_user(chat_id, ten, username, db.ALERT_APPROVED)
     db.set_alert_user_links(chat_id, bot_id, person_id)
+    db.set_alert_user_admin(chat_id, is_on(body.get("la_admin")))
     if not ten or not username:  # để trống → lấy tên / @username từ Telegram (được khi họ đã bấm Start bot)
         p = await tg_profile(chat_id)
         db.upsert_alert_user(chat_id, ten or p.get("ten"), username or p.get("username"), db.ALERT_APPROVED)
@@ -587,21 +573,22 @@ async def refresh_alert_recipient(chat_id: int):
 
 @app.patch("/api/alert-bot/recipients/{chat_id}")
 async def update_alert_recipient(chat_id: int, request: Request):
-    """Sửa tên / username / bot gửi, bật (da_duyet) / tắt (tu_choi) nhận tin."""
+    """Sửa tên / username / bot gửi / hồ sơ người đặt / 👑 admin, bật (da_duyet) / tắt (tu_choi) nhận tin."""
     old = db.get_alert_user(chat_id)
     if not old:
         raise HTTPException(404, "Không có người nhận này")
     body = await request.json()
     status = old["trang_thai"] if "active" not in body else (
-        db.ALERT_APPROVED if body["active"] in (1, True, "1", "true") else db.ALERT_REJECTED)
+        db.ALERT_APPROVED if is_on(body["active"]) else db.ALERT_REJECTED)
     bot_id = parse_bot_id(body["bot_id"]) if "bot_id" in body else old["bot_id"]
     person_id = parse_person_id(body["nguoi_dat_id"]) if "nguoi_dat_id" in body else old["nguoi_dat_id"]
+    admin = int(is_on(body["la_admin"])) if "la_admin" in body else old["la_admin"]
     with db.connect() as conn:  # sửa thẳng (upsert_alert_user giữ tên cũ khi tên mới rỗng)
         conn.execute("UPDATE alert_users SET ten = ?, username = ?, trang_thai = ?, bot_id = ?, nguoi_dat_id = ?, "
-                     "updated_at = ? WHERE chat_id = ?",
+                     "la_admin = ?, updated_at = ? WHERE chat_id = ?",
                      (clean(body["ten"]) if "ten" in body else old["ten"],
                       clean(str(body.get("username") or "").lstrip("@")) if "username" in body else old["username"],
-                      status, bot_id, person_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), chat_id))
+                      status, bot_id, person_id, admin, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), chat_id))
     return {"ok": True}
 
 
