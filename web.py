@@ -147,6 +147,8 @@ async def auth(request: Request, call_next):
             return JSONResponse({"detail": "Chưa đăng nhập"}, status_code=401)
         if path.startswith("/api/users") and user["role"] != "admin":
             return JSONResponse({"detail": "Chỉ admin mới quản lí tài khoản"}, status_code=403)
+        if path.startswith("/api/alert-bot") and user["role"] != "admin":
+            return JSONResponse({"detail": "Chỉ admin mới cấu hình bot alert"}, status_code=403)
         # xóa (đơn, sale, sản phẩm, người đặt, SĐT, QR) và gộp người đặt: chỉ admin
         if user["role"] != "admin" and (request.method == "DELETE" or MERGE_PATH.fullmatch(path)):
             return JSONResponse({"detail": "Chỉ admin mới được xóa / gộp"}, status_code=403)
@@ -230,6 +232,7 @@ async def bad_input(request: Request, e: ValueError):  # dữ liệu nhập sai 
 @app.get("/dia-chi")
 @app.get("/giao-hang")
 @app.get("/tai-khoan")
+@app.get("/bot-alert")
 def index():
     html = (STATIC / "index.html").read_text(encoding="utf-8").replace("__APP_VERSION__", APP_VERSION, 1)
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
@@ -379,6 +382,110 @@ def delete_user(user_id: int, request: Request):
     if user_id == request.state.user["id"]:
         raise ValueError("Không tự xóa chính mình")
     db.delete_web_user(user_id)
+    return {"ok": True}
+
+
+# ---------- bot alert Telegram (admin, tab 🤖 Bot alert): token + telegram_id người nhận ----------
+# token lưu ở meta (shipwatch.ALERT_TOKEN_META), không bao giờ trả nguyên token về trình duyệt – chỉ bản che
+
+def mask_token(token: str) -> str:
+    bot_id, _, secret = token.partition(":")
+    return f"{bot_id}:…{secret[-4:]}" if secret else "…" + token[-4:]
+
+
+async def bot_info(token: str) -> dict:
+    """getMe của bot: {ok, username, name} hoặc {ok: False, error}."""
+    try:
+        me = await shipwatch.tg(token, "getMe")
+        return {"ok": True, "username": me.get("username"), "name": me.get("first_name")}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e).replace(token, "***")}
+
+
+def parse_chat_id(raw) -> int:
+    s = str(raw or "").strip()
+    if not re.fullmatch(r"-?\d{4,20}", s):
+        raise ValueError("Telegram ID phải là số (vd 123456789; nhóm: -100…). Lấy bằng @userinfobot")
+    return int(s)
+
+
+@app.get("/api/alert-bot")
+async def alert_bot(check: int = 0):
+    """Cấu hình bot alert: token đang dùng (che) + nguồn, người nhận (bảng alert_users) + admin trong .env.
+    check=1: gọi getMe xem token còn đúng không (lấy tên bot cho link t.me)."""
+    token, source = shipwatch._alert_token()
+    out = {"source": source, "masked": mask_token(token) if token else "",
+           "env_admins": shipwatch.admin_ids(),
+           "recipients": [dict(r) for r in db.list_alert_users()]}
+    if check and token:
+        out["bot"] = await bot_info(token)
+    return out
+
+
+@app.put("/api/alert-bot/token")
+async def set_alert_token(request: Request):
+    """Lưu token bot alert (kiểm tra bằng getMe trước); token rỗng = xóa, quay về .env."""
+    token = str((await request.json()).get("token") or "").strip()
+    if not token:
+        db.set_meta(shipwatch.ALERT_TOKEN_META, "")
+        return {"ok": True}
+    if not re.fullmatch(r"\d{5,15}:[A-Za-z0-9_-]{30,60}", token):
+        raise ValueError("Token không đúng dạng 123456789:ABC… (lấy từ @BotFather)")
+    info = await bot_info(token)
+    if not info["ok"]:
+        raise ValueError(f"Telegram không nhận token này: {info['error']}")
+    db.set_meta(shipwatch.ALERT_TOKEN_META, token)
+    return {"ok": True, "bot": info}
+
+
+@app.post("/api/alert-bot/recipients")
+async def add_alert_recipient(request: Request):
+    body = await request.json()
+    chat_id = parse_chat_id(body.get("chat_id"))
+    db.upsert_alert_user(chat_id, clean(body.get("ten")), clean(str(body.get("username") or "").lstrip("@")),
+                         db.ALERT_APPROVED)
+    return {"ok": True}
+
+
+@app.patch("/api/alert-bot/recipients/{chat_id}")
+async def update_alert_recipient(chat_id: int, request: Request):
+    """Sửa tên / username, bật (da_duyet) / tắt (tu_choi) nhận tin."""
+    old = db.get_alert_user(chat_id)
+    if not old:
+        raise HTTPException(404, "Không có người nhận này")
+    body = await request.json()
+    status = old["trang_thai"] if "active" not in body else (
+        db.ALERT_APPROVED if body["active"] in (1, True, "1", "true") else db.ALERT_REJECTED)
+    with db.connect() as conn:  # sửa thẳng (upsert_alert_user giữ tên cũ khi tên mới rỗng)
+        conn.execute("UPDATE alert_users SET ten = ?, username = ?, trang_thai = ?, updated_at = ? WHERE chat_id = ?",
+                     (clean(body["ten"]) if "ten" in body else old["ten"],
+                      clean(str(body.get("username") or "").lstrip("@")) if "username" in body else old["username"],
+                      status, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), chat_id))
+    return {"ok": True}
+
+
+@app.delete("/api/alert-bot/recipients/{chat_id}")
+def delete_alert_recipient(chat_id: int):
+    if not db.remove_alert_user(chat_id):
+        raise HTTPException(404, "Không có người nhận này")
+    return {"ok": True}
+
+
+@app.post("/api/alert-bot/test")
+async def test_alert(request: Request):
+    """Gửi 1 tin thử tới 1 telegram_id bằng bot alert đang dùng (báo lỗi rõ: chưa bấm Start, sai id…)."""
+    chat_id = parse_chat_id((await request.json()).get("chat_id"))
+    token = shipwatch._alert_token()[0]
+    if not token:
+        raise ValueError("Chưa có token bot alert")
+    try:
+        await shipwatch.tg(token, "sendMessage", chat_id=chat_id,
+                           text=f"✅ Tin thử từ web Quản lí đơn ({request.state.user['username']}): "
+                                "bạn sẽ nhận thông báo vận chuyển qua bot này.")
+    except Exception as e:  # noqa: BLE001
+        msg = str(e).replace(token, "***")
+        hint = " – người này cần mở bot và bấm Start trước" if "chat not found" in msg or "blocked" in msg else ""
+        raise ValueError(f"Không gửi được: {msg}{hint}")
     return {"ok": True}
 
 

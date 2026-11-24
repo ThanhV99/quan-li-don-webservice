@@ -753,14 +753,15 @@ async function changeMyPassword() {
 
 // ---------- điều hướng ----------
 const TABS = [["home", "🏠 Tổng quan"], ["orders", "🧾 Đơn hàng"], ["sales", "🔥 Săn sale"],
-              ["products", "🏷 Sản phẩm"], ["people", "👤 Người đặt"], ["phones", "📞 SĐT"], ["addresses", "📍 Địa chỉ"], ["lastmile", "🏍 Giao hàng"], ["users", "🔐 Tài khoản"]];
+              ["products", "🏷 Sản phẩm"], ["people", "👤 Người đặt"], ["phones", "📞 SĐT"], ["addresses", "📍 Địa chỉ"], ["lastmile", "🏍 Giao hàng"], ["users", "🔐 Tài khoản"], ["alertbot", "🤖 Bot alert"]];
+const ADMIN_TABS = ["users", "alertbot"];  // chỉ tài khoản admin thấy / vào được (server cũng chặn API)
 const state = {picked: new Map(), tab: "home", status: "Đã đặt", q: "", tu: "", den: "", month: null, saleAll: false, saleQ: "", saleGroup: "", meta: null, byPerson: false, byProduct: false, byBonus: false, byAddr: false, groupAddr: false};
 try { const {status, saleAll, saleGroup, byPerson, byProduct, byBonus, byAddr, groupAddr} = JSON.parse(localStorage.getItem("qld") || "{}"); Object.assign(state, {status: status || state.status, saleAll: !!saleAll, saleGroup: saleGroup || "", byPerson: !!byPerson, byProduct: !!byProduct, byBonus: !!byBonus, byAddr: !!byAddr, groupAddr: !!groupAddr}); } catch {}
 const save = () => { try { localStorage.setItem("qld", JSON.stringify({status: state.status, saleAll: state.saleAll, saleGroup: state.saleGroup, byPerson: state.byPerson, byProduct: state.byProduct, byBonus: state.byBonus, byAddr: state.byAddr, groupAddr: state.groupAddr})); } catch {} };
 
 // mỗi tab 1 đường dẫn (web.py trả index.html cho các path này); bộ lọc nằm trong query: /don-hang?status=…&q=…, /?month=…
 const ROUTES = {home: "/", orders: "/don-hang", sales: "/san-sale", products: "/san-pham", people: "/nguoi-dat",
-                phones: "/sdt", addresses: "/dia-chi", lastmile: "/giao-hang", users: "/tai-khoan"};
+                phones: "/sdt", addresses: "/dia-chi", lastmile: "/giao-hang", users: "/tai-khoan", alertbot: "/bot-alert"};
 function tabUrl(tab) {
   const qs = new URLSearchParams();
   if (tab === "orders") {
@@ -786,8 +787,8 @@ function syncUrl(replace) {
   if (url !== location.pathname + location.search) history[replace ? "replaceState" : "pushState"](null, "", url);
 }
 function render() {
-  if (state.tab === "users" && state.me?.role !== "admin") { state.tab = "home"; syncUrl(true); }
-  $("#nav").innerHTML = TABS.filter(([k]) => k !== "users" || state.me?.role === "admin").map(([k, l]) =>
+  if (ADMIN_TABS.includes(state.tab) && state.me?.role !== "admin") { state.tab = "home"; syncUrl(true); }
+  $("#nav").innerHTML = TABS.filter(([k]) => !ADMIN_TABS.includes(k) || state.me?.role === "admin").map(([k, l]) =>
     `<a href="${ROUTES[k]}" class="${k === state.tab ? "on" : ""}" onclick="if(!event.ctrlKey&&!event.metaKey&&!event.shiftKey){event.preventDefault();go('${k}')}">${l}</a>`).join("");
   // vào tab khác: hiện khung chờ ngay (trang cũ không đứng im tới khi có dữ liệu); tab lỗi tải → nút Thử lại
   const newTab = render.lastTab !== state.tab;
@@ -796,7 +797,7 @@ function render() {
     pageLoad((TABS.find(([k]) => k === state.tab) || [])[1]);
   }
   let r;
-  try { r = ({home: viewHome, orders: viewOrders, sales: viewSales, products: viewProducts, people: viewPeople, phones: viewPhones, addresses: viewAddresses, lastmile: viewLastMile, users: viewUsers})[state.tab](); }
+  try { r = ({home: viewHome, orders: viewOrders, sales: viewSales, products: viewProducts, people: viewPeople, phones: viewPhones, addresses: viewAddresses, lastmile: viewLastMile, users: viewUsers, alertbot: viewAlertBot})[state.tab](); }
   catch (e) { r = Promise.reject(e); }
   if (newTab) Promise.resolve(r).finally(() => { pageLoad.viewDone = true; pageLoad.check(); }).catch(() => {});
   Promise.resolve(r).catch(e => {
@@ -2750,6 +2751,95 @@ async function toggleUser(id, active) {
 async function deleteUser(id) {
   if (!confirm(`Xóa tài khoản “${state.users[id].username}”?`)) return;
   await del(`/users/${id}`); toast("🗑 Đã xóa"); closeModal(); viewUsers();
+}
+
+// ---------- bot alert Telegram (admin): token + telegram_id người nhận thông báo vận chuyển ----------
+const TOKEN_SOURCES = {web: "nhập trên web", env: "ALERT_BOT_TOKEN trong .env", main: "bot chính (BOT_TOKEN)", "": "chưa có"};
+async function viewAlertBot() {
+  const c = await api("/alert-bot?check=1");
+  state.alertBot = c;
+  state.alertRcpt = Object.fromEntries(c.recipients.map(r => [r.chat_id, r]));
+  const b = c.bot;
+  const botLine = !c.source ? '<span class="badge b-cancel">chưa có token – không gửi được alert</span>'
+    : b && !b.ok ? `<span class="badge b-cancel">⚠️ token lỗi: ${esc(b.error)}</span>`
+    : b ? `<a href="https://t.me/${esc(b.username)}" target="_blank" rel="noopener"><b>@${esc(b.username)}</b></a> <span class="muted">${esc(b.name || "")}</span>` : "";
+  const on = c.recipients.filter(r => r.trang_thai === "da_duyet").length;
+  $("#view").innerHTML = `
+    <div class="card" style="padding:14px;margin-bottom:12px">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between">
+        <div><b>🤖 Bot gửi alert</b> ${botLine}
+          <div class="meta">Token: <code>${esc(c.masked || "—")}</code> · nguồn: ${TOKEN_SOURCES[c.source]}</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn primary" onclick="alertTokenForm()">🔑 ${c.source === "web" ? "Đổi token" : "Nhập token"}</button>
+          ${c.source === "web" ? '<button class="btn" onclick="clearAlertToken()">↩ Dùng token .env</button>' : ""}
+        </div>
+      </div>
+      <div class="meta" style="margin-top:6px">Người nhận phải mở bot${b?.username ? ` @${esc(b.username)}` : ""} và bấm <b>Start</b> một lần thì bot mới nhắn được.
+        Lấy Telegram ID: nhắn <a href="https://t.me/userinfobot" target="_blank" rel="noopener">@userinfobot</a>.</div>
+    </div>
+    <div class="toolbar"><span class="meta">${on}/${c.recipients.length} người đang nhận alert
+      ${c.env_admins.length ? ` · admin trong .env (luôn nhận, kể cả tin đơn hủy / hoàn): ${c.env_admins.map(esc).join(", ")}` : ""}</span></div>
+    <div class="card"><table style="min-width:560px">
+      <tr><th>Telegram ID</th><th>Tên</th><th>Username</th><th>Nhận alert</th><th>Thêm lúc</th><th></th></tr>
+      ${c.recipients.length ? c.recipients.map(r => `<tr class="click" onclick="alertRcptForm(${r.chat_id})">
+        <td><code>${r.chat_id}</code></td><td><b>${esc(r.ten || "")}</b></td>
+        <td class="muted">${r.username ? "@" + esc(r.username) : ""}</td>
+        <td>${r.trang_thai === "da_duyet" ? '<span class="badge b-done">● đang nhận</span>'
+              : r.trang_thai === "cho_duyet" ? '<span class="badge b-muted">⏳ chờ duyệt</span>' : '<span class="badge b-cancel">⏸ tắt</span>'}</td>
+        <td class="muted">${dtFull(r.created_at)}</td>
+        <td><button class="btn" onclick="event.stopPropagation();testAlert(${r.chat_id})">📨 Gửi thử</button></td></tr>`).join("")
+        : '<tr><td colspan="6" class="muted">Chưa có ai – bấm ＋ để thêm Telegram ID</td></tr>'}
+    </table></div>
+    <button class="btn primary fab" onclick="alertRcptForm()">＋ Thêm người nhận</button>`;
+}
+function alertTokenForm() {
+  openModal(`${modalHead("🔑 Token bot alert")}
+    <div class="form">${field(["token", "Token từ @BotFather", "password", "", {full: true, ph: "123456789:ABC…"}])}</div>
+    <div class="meta" style="margin-top:8px">Web kiểm tra token với Telegram trước khi lưu. Token chỉ lưu trong database, không hiện lại đầy đủ.</div>
+    <div class="foot"><button class="btn" onclick="closeModal()">Hủy</button>
+      <button class="btn primary" onclick="saveAlertToken()">Lưu</button></div>`);
+}
+async function saveAlertToken() {
+  const {token} = formData();
+  if (!token.trim()) return toast("Nhập token", true);
+  const r = await api("/alert-bot/token", {method: "PUT", body: {token}});
+  toast(`✅ Đã lưu token bot @${r.bot?.username || ""}`); closeModal(); viewAlertBot();
+}
+async function clearAlertToken() {
+  if (!confirm("Xóa token đã nhập trên web, quay về token trong .env (ALERT_BOT_TOKEN / BOT_TOKEN)?")) return;
+  await api("/alert-bot/token", {method: "PUT", body: {token: ""}});
+  toast("↩ Đã xóa token nhập trên web"); viewAlertBot();
+}
+function alertRcptForm(chatId) {
+  const r = chatId ? state.alertRcpt[chatId] : null;
+  openModal(`${modalHead(r ? `📨 ${esc(r.ten || r.chat_id)}` : "＋ Thêm người nhận alert")}
+    <div class="form">
+      ${r ? "" : field(["chat_id", "Telegram ID", "num", "", {ph: "vd 123456789"}])}
+      ${field(["ten", "Tên gợi nhớ", "text", r?.ten || ""])}
+      ${field(["username", "Username Telegram (không bắt buộc)", "text", r?.username || "", {ph: "@ten"}])}
+      ${r ? field(["active", "Nhận alert", "select", r.trang_thai === "da_duyet" ? "1" : "0", {options: [["1", "● Đang nhận"], ["0", "⏸ Tắt"]]}]) : ""}
+    </div>
+    <div class="foot">
+      ${r ? `<button class="btn bad left" onclick="deleteAlertRcpt(${chatId})">🗑 Xóa</button>
+        <button class="btn" onclick="testAlert(${chatId})">📨 Gửi thử</button>` : ""}
+      <button class="btn" onclick="closeModal()">Hủy</button>
+      <button class="btn primary" onclick="saveAlertRcpt(${chatId || 0})">${r ? "Lưu" : "Thêm"}</button>
+    </div>`);
+}
+async function saveAlertRcpt(chatId) {
+  const f = formData();
+  if (chatId) await patch(`/alert-bot/recipients/${chatId}`, {ten: f.ten, username: f.username, active: f.active === "1"});
+  else await post("/alert-bot/recipients", f);
+  toast(chatId ? "✏️ Đã lưu" : "➕ Đã thêm – bấm 📨 Gửi thử để kiểm tra"); closeModal(); viewAlertBot();
+}
+async function deleteAlertRcpt(chatId) {
+  const r = state.alertRcpt[chatId];
+  if (!confirm(`Xóa người nhận “${r.ten || chatId}”? Họ sẽ không nhận alert nữa.`)) return;
+  await del(`/alert-bot/recipients/${chatId}`); toast("🗑 Đã xóa"); closeModal(); viewAlertBot();
+}
+async function testAlert(chatId) {
+  await post("/alert-bot/test", {chat_id: chatId});
+  toast("📨 Đã gửi tin thử");
 }
 
 start();

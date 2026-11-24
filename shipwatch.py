@@ -12,8 +12,8 @@ trong FIRST_CHECK_MINUTES. Giờ hẹn + chữ ký mốc đã báo (vc_alert_las
 Một lúc chỉ 1 lượt chạy (db.take_lease) → không báo trùng khi cron và lệnh bot chạy cùng lúc.
 
 Chỉ GỬI tin (người dùng chọn 23/11/2026: bot Telegram không cần chạy / lắng nghe liên tục nữa): sendMessage của
-Bot API bằng ALERT_BOT_TOKEN (trống thì BOT_TOKEN) tới ALERT_CHAT_IDS (trống thì ALLOWED_USER_IDS) + người đã duyệt
-sẵn trong alert_users. Không có nút bấm / deep link bot: link trong tin mở trang đơn trên web
+Bot API bằng token nhập ở web (tab 🤖 Bot alert, admin; trống thì ALERT_BOT_TOKEN, rồi BOT_TOKEN) tới ALERT_CHAT_IDS
+(trống thì ALLOWED_USER_IDS) + người đã duyệt trong alert_users (admin thêm telegram_id ở tab đó). Không có nút bấm / deep link bot: link trong tin mở trang đơn trên web
 (PUBLIC_URL/don-hang?don=<id>&tra=1); đơn bị hủy / hoàn → tin cho admin kèm link mở đơn để tự chuyển Đã hủy.
 """
 import asyncio
@@ -72,6 +72,19 @@ async def tg(token: str, method: str, **payload) -> dict:
     return data["result"]
 
 
+ALERT_TOKEN_META = "alert_bot_token"  # meta: token bot alert admin nhập ở web (tab 🤖 Bot alert), đè .env
+
+
+def _alert_token() -> tuple[str, str]:
+    """(token, nguồn) gửi alert: nhập trên web ("web") > ALERT_BOT_TOKEN ("env") > bot chính BOT_TOKEN ("main").
+    Tên bắt đầu "_" → không lộ qua API dịch vụ của bot (/api/svc/shipwatch.*)."""
+    if token := (db.get_meta(ALERT_TOKEN_META) or "").strip():
+        return token, "web"
+    if ALERT_BOT_TOKEN:
+        return ALERT_BOT_TOKEN, "env"
+    return (BOT_TOKEN, "main") if BOT_TOKEN else ("", "")
+
+
 def admin_ids() -> list[int]:
     return list(ALERT_CHAT_IDS or ALLOWED_USER_IDS)
 
@@ -86,10 +99,11 @@ def alert_recipients() -> list[int]:
 
 async def send_alert(text: str, chat_ids: list[int] | None = None) -> int:
     """Gửi bằng bot alert (chưa cấu hình thì bot chính) tới mọi người nhận (hoặc chat_ids). Trả về số tin gửi được."""
-    token = ALERT_BOT_TOKEN or BOT_TOKEN
+    token = _alert_token()[0]
     chat_ids = alert_recipients() if chat_ids is None else chat_ids
     if not token or not chat_ids:
-        log.warning("Chưa có ALERT_BOT_TOKEN / BOT_TOKEN hoặc người nhận (ALERT_CHAT_IDS / ALLOWED_USER_IDS) để gửi alert")
+        log.warning("Chưa có token bot alert (web tab Bot alert / ALERT_BOT_TOKEN / BOT_TOKEN) hoặc người nhận "
+                    "(tab Bot alert / ALERT_CHAT_IDS / ALLOWED_USER_IDS) để gửi alert")
         return 0
     sent = 0
     for chat_id in chat_ids:
