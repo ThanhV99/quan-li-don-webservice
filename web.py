@@ -398,13 +398,26 @@ def mask_token(token: str) -> str:
     return f"{bot_id}:…{secret[-4:]}" if secret else "…" + token[-4:]
 
 
+COMMAND_SCOPES = ({"type": "default"}, {"type": "all_private_chats"}, {"type": "all_group_chats"})
+
+
+async def clear_bot_commands(token: str):
+    """Bot alert chỉ GỬI tin, không đọc lệnh → xóa menu lệnh (/danggiao, /stop… code bot cũ đăng ký, Telegram vẫn giữ
+    tới khi xóa) để người nhận không bấm lệnh mà không ai trả lời. Bỏ qua bot chính (BOT_TOKEN): menu đó của bot chính."""
+    if token == BOT_TOKEN:
+        return
+    scopes = [*COMMAND_SCOPES, *({"type": "chat", "chat_id": i} for i in shipwatch.admin_ids())]  # menu riêng cho admin
+    await asyncio.gather(*(shipwatch.tg(token, "deleteMyCommands", scope=s) for s in scopes), return_exceptions=True)
+
+
 async def bot_info(token: str) -> dict:
-    """getMe của bot: {ok, username, name} hoặc {ok: False, error}."""
+    """getMe của bot: {ok, username, name} hoặc {ok: False, error}. Token đúng thì xóa luôn menu lệnh cũ."""
     try:
         me = await shipwatch.tg(token, "getMe")
-        return {"ok": True, "username": me.get("username"), "name": me.get("first_name")}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e).replace(token, "***")}
+    await clear_bot_commands(token)
+    return {"ok": True, "username": me.get("username"), "name": me.get("first_name")}
 
 
 async def checked_token(raw) -> tuple[str, dict]:
