@@ -459,13 +459,14 @@ async def tg_profile(chat_id: int) -> dict:
 
 @app.get("/api/alert-bot")
 async def alert_bot(check: int = 0):
-    """Bot mặc định (.env, che token) + các bot nhập ở web (che token) + người nhận + admin trong .env.
-    check=1: gọi getMe từng bot xem token còn đúng không (lấy @username cho link t.me, lưu lại nếu đổi)."""
-    token, source = shipwatch._default_token()
+    """Các bot trong bảng (che token, ⭐ mac_dinh) + người nhận + admin trong .env. Bảng chưa có bot → "env": token
+    dự phòng trong .env (che) để admin bấm chuyển vào bảng.
+    check=1: gọi getMe từng bot xem token còn đúng không (lấy tên + @username, lưu lại nếu đổi)."""
     bots = db.list_alert_bots()
-    out = {"default": {"source": source, "masked": mask_token(token) if token else ""},
+    token, source = ("", "") if bots else shipwatch._env_token()
+    out = {"env": {"source": source, "masked": mask_token(token) if token else ""},
            "bots": [{"id": b["id"], "ten": b["ten"], "username": b["username"], "masked": mask_token(b["token"]),
-                     "created_at": b["created_at"]} for b in bots],
+                     "mac_dinh": bool(b["mac_dinh"]), "created_at": b["created_at"]} for b in bots],
            "env_admins": shipwatch.admin_ids(),
            "recipients": [dict(r) for r in db.list_alert_users()]}
     with db.connect() as conn:  # chọn hồ sơ người đặt cho người nhận
@@ -473,7 +474,7 @@ async def alert_bot(check: int = 0):
     if check:
         infos = list(await asyncio.gather(*(bot_info(t) for t in ([token] if token else []) + [b["token"] for b in bots])))
         if token:
-            out["default"]["bot"] = infos.pop(0)
+            out["env"]["bot"] = infos.pop(0)
         for b, row, info in zip(out["bots"], bots, infos):
             b["bot"] = info
             if info["ok"] and (info["username"] != row["username"] or info["name"] != row["ten"]):
@@ -511,6 +512,28 @@ async def update_alert_bot(bot_id: int, request: Request):
         raise ValueError("Token này đã có ở bot khác trong bảng")
     db.update_alert_bot(bot_id, token=token, ten=info.get("name"), username=info.get("username"))
     return {"ok": True, "bot": info}
+
+
+@app.post("/api/alert-bot/bots/{bot_id}/default")
+def default_alert_bot(bot_id: int):
+    """⭐ Đặt làm bot mặc định (người nhận chưa chọn bot + admin trong .env nhận qua bot này)."""
+    if not db.get_alert_bot(bot_id):
+        raise HTTPException(404, "Không có bot này")
+    db.set_default_alert_bot(bot_id)
+    return {"ok": True}
+
+
+@app.post("/api/alert-bot/import-env")
+async def import_env_bot():
+    """📥 Chép token dự phòng trong .env (ALERT_BOT_TOKEN, trống thì BOT_TOKEN) vào bảng → từ đó sửa trên web."""
+    token, _ = shipwatch._env_token()
+    if not token:
+        raise ValueError("Trong .env không có token bot")
+    if db.find_alert_bot(token):
+        raise ValueError("Bot này đã có trong bảng")
+    token, info = await checked_token(token)
+    bot_id = db.add_alert_bot(token, info.get("name"), info.get("username"))
+    return {"ok": True, "id": bot_id, "bot": info}
 
 
 @app.delete("/api/alert-bot/bots/{bot_id}")

@@ -303,6 +303,7 @@ CREATE TABLE IF NOT EXISTS alert_bots (
     token       TEXT NOT NULL UNIQUE,
     ten         TEXT,
     username    TEXT,
+    mac_dinh    INTEGER NOT NULL DEFAULT 0,  -- 1 = bot mặc định (người nhận chưa chọn bot + admin trong .env)
     created_at  TEXT NOT NULL
 );
 
@@ -675,6 +676,9 @@ def _init_db_full():
                 "SELECT DISTINCT TRIM(don_vi_vc) FROM orders WHERE TRIM(COALESCE(don_vi_vc, '')) != ''")]
             for name in DEFAULT_CARRIERS + used:
                 conn.execute("INSERT INTO carriers (ten, created_at) VALUES (?, ?) ON CONFLICT DO NOTHING", (name, _now()))
+        if "mac_dinh" not in table_columns(conn, "alert_bots"):
+            conn.execute("ALTER TABLE alert_bots ADD COLUMN mac_dinh INTEGER NOT NULL DEFAULT 0")
+        _ensure_default_bot(conn)
         alert_cols = table_columns(conn, "alert_users")
         for col, ddl in (("username", "TEXT"), ("trang_thai", "TEXT NOT NULL DEFAULT 'da_duyet'"),
                          ("updated_at", "TEXT"), ("bot_id", "INTEGER"),
@@ -689,6 +693,7 @@ def _init_db_full():
                              (token, _now()))
                 bot_id = conn.execute("SELECT id FROM alert_bots WHERE token = ?", (token,)).fetchone()[0]
                 conn.execute("UPDATE alert_users SET bot_id = ? WHERE bot_id IS NULL", (bot_id,))
+                _ensure_default_bot(conn)
             conn.execute("DELETE FROM meta WHERE key = 'alert_bot_token'")
         # người nhận alert trước đây lưu dạng JSON trong meta
         if (old_alert := conn.execute("SELECT value FROM meta WHERE key = 'alert_chats'").fetchone()):
@@ -1279,10 +1284,29 @@ def find_alert_bot(token: str):
         return conn.execute("SELECT * FROM alert_bots WHERE token = ?", (token,)).fetchone()
 
 
-def add_alert_bot(token: str, name: str | None, username: str | None) -> int:
+def _ensure_default_bot(conn):
+    """Bảng có bot thì luôn có đúng 1 bot mặc định: chưa có thì lấy bot thêm sớm nhất."""
+    if not conn.execute("SELECT 1 FROM alert_bots WHERE mac_dinh = 1").fetchone():
+        conn.execute("UPDATE alert_bots SET mac_dinh = 1 WHERE id = (SELECT MIN(id) FROM alert_bots)")
+
+
+def default_alert_bot():
     with connect() as conn:
-        return conn.execute("INSERT INTO alert_bots (token, ten, username, created_at) VALUES (?, ?, ?, ?) RETURNING id",
-                            (token, name, username, _now())).fetchone()[0]
+        return conn.execute("SELECT * FROM alert_bots WHERE mac_dinh = 1 ORDER BY id LIMIT 1").fetchone()
+
+
+def set_default_alert_bot(bot_id: int):
+    with connect() as conn:
+        conn.execute("UPDATE alert_bots SET mac_dinh = CASE WHEN id = ? THEN 1 ELSE 0 END", (bot_id,))
+
+
+def add_alert_bot(token: str, name: str | None, username: str | None) -> int:
+    """Thêm bot; bot đầu tiên thành bot mặc định."""
+    with connect() as conn:
+        bot_id = conn.execute("INSERT INTO alert_bots (token, ten, username, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+                              (token, name, username, _now())).fetchone()[0]
+        _ensure_default_bot(conn)
+        return bot_id
 
 
 def update_alert_bot(bot_id: int, **fields):
@@ -1295,12 +1319,14 @@ def update_alert_bot(bot_id: int, **fields):
 
 
 def remove_alert_bot(bot_id: int):
-    """Xóa bot; người nhận đang dùng bot này quay về bot mặc định (.env). Trả về dòng đã xóa."""
+    """Xóa bot; người nhận đang dùng bot này quay về bot mặc định (xóa bot mặc định → bot thêm sớm nhất còn lại
+    thành mặc định). Trả về dòng đã xóa."""
     with connect() as conn:
         row = conn.execute("SELECT * FROM alert_bots WHERE id = ?", (bot_id,)).fetchone()
         if row:
             conn.execute("UPDATE alert_users SET bot_id = NULL WHERE bot_id = ?", (bot_id,))
             conn.execute("DELETE FROM alert_bots WHERE id = ?", (bot_id,))
+            _ensure_default_bot(conn)
         return row
 
 

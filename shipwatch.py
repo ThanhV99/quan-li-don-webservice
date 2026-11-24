@@ -74,12 +74,20 @@ async def tg(token: str, method: str, **payload) -> dict:
     return data["result"]
 
 
-def _default_token() -> tuple[str, str]:
-    """(token, nguồn) của bot mặc định – cho admin trong .env và người nhận chưa chọn bot:
-    ALERT_BOT_TOKEN ("env") > bot chính BOT_TOKEN ("main"). Tên bắt đầu "_" → không lộ qua API dịch vụ của bot."""
+def _env_token() -> tuple[str, str]:
+    """Token dự phòng trong .env: ALERT_BOT_TOKEN ("env") > bot chính BOT_TOKEN ("main")."""
     if ALERT_BOT_TOKEN:
         return ALERT_BOT_TOKEN, "env"
     return (BOT_TOKEN, "main") if BOT_TOKEN else ("", "")
+
+
+def _default_token() -> tuple[str, str]:
+    """(token, nguồn) của bot mặc định – cho admin trong .env và người nhận chưa chọn bot: bot ⭐ mặc định trong
+    bảng alert_bots ("db", admin sửa trên web) > token dự phòng trong .env. Tên bắt đầu "_" → không lộ qua API
+    dịch vụ của bot."""
+    if b := db.default_alert_bot():
+        return b["token"], "db"
+    return _env_token()
 
 
 def admin_ids() -> list[int]:
