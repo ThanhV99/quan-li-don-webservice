@@ -718,6 +718,25 @@ def clean(v):
     return None if v in ("", None) else v
 
 
+def parse_day_text(text: str) -> str:
+    """Ngày gõ tay → YYYY-MM-DD (giống parseDmy bên JS); sai → ValueError."""
+    t = text.strip()
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", t)
+    if m:
+        y, mo, d = map(int, m.groups())
+    else:
+        m = re.fullmatch(r"(\d{1,2})[/.\-](\d{1,2})(?:[/.\-](\d{2}|\d{4}))?", t) or \
+            re.fullmatch(r"(\d{2})(\d{2})(\d{2}|\d{4})?", t)
+        if not m:
+            raise ValueError(f"Ngày không đúng: {text} (gõ dd/mm/yyyy hoặc liền số 27112026)")
+        d, mo = int(m[1]), int(m[2])
+        y = datetime.now().year if not m[3] else 2000 + int(m[3]) if len(m[3]) == 2 else int(m[3])
+    try:
+        return datetime(y, mo, d).strftime("%Y-%m-%d")
+    except ValueError:
+        raise ValueError(f"Ngày không có thật: {text}") from None
+
+
 def convert(table: str, field: str, raw):
     """Giá trị gõ trên web → giá trị lưu DB (tiền đọc như bot: 4tr3, 150k, 150-200k). Khoảng giá → (thấp, cao)."""
     raw = clean(raw)
@@ -749,6 +768,14 @@ def convert(table: str, field: str, raw):
         if not str(raw or 0).isdigit() or int(raw or 0) > 99:
             raise ValueError("Nhóm sale phải là số 1 – 99 (để trống = chưa chia nhóm)")
         return int(raw or 0)
+    if field == "bh_kich":  # ngày kích bảo hành: dd/mm/yyyy, dd/mm/yy, 27112026, 271126 hoặc YYYY-MM-DD
+        return None if raw is None else parse_day_text(str(raw))
+    if field == "bh_thang":
+        if raw is None:
+            return None
+        if not str(raw).isdigit() or not 0 < int(raw) <= 120:
+            raise ValueError("Bảo hành tính theo tháng: 1 – 120 (vd 12, 24, 36)")
+        return int(raw)
     if field == "so_luong":
         if raw is None:
             return None
@@ -817,7 +844,8 @@ def meta():
         "products": db.product_names(),
         "product_prices": db.product_prices(),
         "carriers": db.carrier_names(),
-        "shops": db.shop_names(30),
+        "shops": db.shop_choices(),  # sổ shop + shop đã gặp ở đơn / sale
+        "shop_book": [{k: b[k] for k in ("id", "ten", "vat", "ghi_chu")} for b in db.list_shops()["book"]],
         "nguon_khach": ["Zalo", "Facebook"],
         "nguon_don": ["Shopee", "TikTok"],
         "fields": {t: dict(f) for t, f in db.TABLES.items()},
@@ -1043,6 +1071,37 @@ def campaign_in(body: dict) -> dict:
 
 def campaign_out(c) -> dict:
     return {**dict(c), **db.campaign_stats(c), "thuong_label": money_short(c["thuong"])}
+
+
+# sổ shop: có xuất VAT không; đăng ký trước /api/{table}/{rec_id} chung
+@app.get("/api/shops")
+def shops():
+    return db.list_shops()
+
+
+async def _shop_body(request: Request) -> tuple:
+    b = await request.json()
+    return str(b.get("ten") or ""), b.get("vat"), str(b.get("ghi_chu") or "")
+
+
+@app.post("/api/shops")
+async def create_shop(request: Request):
+    return {"id": db.save_shop(None, *await _shop_body(request))}
+
+
+@app.patch("/api/shops/{sid}")
+async def update_shop(sid: int, request: Request):
+    try:
+        return {"id": db.save_shop(sid, *await _shop_body(request))}
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.delete("/api/shops/{sid}")
+def delete_shop(sid: int):
+    if not db.delete_shop(sid):
+        raise HTTPException(404, "Không tìm thấy shop")
+    return {"ok": True}
 
 
 # sổ địa chỉ kho / bưu cục của hãng (tab 🏍 Giao hàng); đăng ký trước /api/{table}/{rec_id} chung

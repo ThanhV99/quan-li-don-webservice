@@ -130,7 +130,12 @@ ORDER_FIELDS = [
     ("nguon_khach", "Nguồn khách"),
     ("ten_sp", "Tên sản phẩm"),
     ("so_luong", "Số lượng"),
+    ("mau", "Màu / phân loại"),  # mô tả chi tiết từng đơn (người dùng yêu cầu 11/2026): màu, size, phiên bản…
+    ("mo_ta", "Mô tả chi tiết"),  # cấu hình, serial, ghi chú về món hàng (nhiều dòng)
+    ("bh_kich", "Ngày kích bảo hành"),  # YYYY-MM-DD
+    ("bh_thang", "Bảo hành (tháng)"),  # số tháng bảo hành → hết hạn = bh_kich + bh_thang tháng
     ("nguon_don", "Nguồn đơn"),
+    ("shop", "Shop"),  # shop đã mua (tên khớp sổ shop `shops` → biết shop có xuất VAT không)
     ("gia_dat", "Giá đặt"),
     ("gia_thu", "Giá shop thu"),
     ("bonus_thu", "Bonus thu"),  # tiền thu thêm cả đơn (không nhân số lượng), cộng vào thu khi tính lãi (order_thu)
@@ -223,7 +228,12 @@ CREATE TABLE IF NOT EXISTS orders (
     nguon_khach   TEXT,             -- Zalo / Facebook
     ten_sp        TEXT,
     so_luong      INTEGER,          -- NULL = không ghi
+    mau           TEXT,             -- màu / phân loại (size, phiên bản…)
+    mo_ta         TEXT,             -- mô tả chi tiết món hàng
+    bh_kich       TEXT,             -- ngày kích hoạt bảo hành YYYY-MM-DD
+    bh_thang      INTEGER,          -- số tháng bảo hành
     nguon_don     TEXT,             -- Shopee / TikTok
+    shop          TEXT,             -- shop đã mua (khớp sổ shop theo name_key)
     gia_dat       INTEGER DEFAULT 0,
     gia_thu       INTEGER DEFAULT 0,
     bonus_thu     INTEGER DEFAULT 0,  -- thu thêm (cả đơn), cộng vào giá shop thu khi tính lãi
@@ -374,6 +384,17 @@ CREATE TABLE IF NOT EXISTS image_files (
     file_id     TEXT PRIMARY KEY,
     data        BLOB NOT NULL,          -- file ảnh (JPEG)
     created_at  TEXT NOT NULL           -- lúc lưu (prune_images giữ ảnh chưa ai dùng ít nhất IMAGE_KEEP_DAYS)
+);
+
+-- sổ shop (người dùng yêu cầu 11/2026): shop có xuất hóa đơn VAT không, để sau chỉ mua ở shop xuất VAT.
+-- Đơn (orders.shop) và săn sale (sales.shop) ghi tên shop; khớp sổ theo name_key(tên)
+CREATE TABLE IF NOT EXISTS shops (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ten         TEXT NOT NULL,
+    ten_key     TEXT NOT NULL UNIQUE,      -- name_key(ten)
+    vat         INTEGER,                   -- 1 = có xuất VAT, 0 = không, NULL = chưa rõ
+    ghi_chu     TEXT,
+    updated_at  TEXT NOT NULL
 );
 
 -- sổ địa chỉ kho / bưu cục của hãng vận chuyển (web tab 🏍 Giao hàng): tên đúng như trong hành trình
@@ -757,6 +778,9 @@ def _init_db_full():
             conn.execute("ALTER TABLE orders ADD COLUMN chien_dich INTEGER")
         if "bonus_thu" not in cols:
             conn.execute("ALTER TABLE orders ADD COLUMN bonus_thu INTEGER DEFAULT 0")
+        for col, typ in (("shop", "TEXT"), ("mau", "TEXT"), ("mo_ta", "TEXT"), ("bh_kich", "TEXT"), ("bh_thang", "INTEGER")):
+            if col not in cols:  # mô tả chi tiết + bảo hành từng đơn
+                conn.execute(f"ALTER TABLE orders ADD COLUMN {col} {typ}")
         if "tach_tu" not in cols:  # đơn tách ra khi bán 1 phần (sell_part): id đơn gốc
             conn.execute("ALTER TABLE orders ADD COLUMN tach_tu INTEGER")
         # bỏ "công tối thiểu" của chiến dịch (thay bằng chọn chiến dịch cho từng đơn)
@@ -1093,9 +1117,9 @@ def search_orders(keyword: str, limit: int | None = 20):
         return conn.execute(
             """SELECT * FROM orders
                WHERE ten_nguoi_dat LIKE ? OR sdt LIKE ? OR ma_don LIKE ?
-                  OR ten_sp LIKE ? OR dia_chi LIKE ? OR ten_tren_don LIKE ?
+                  OR ten_sp LIKE ? OR dia_chi LIKE ? OR ten_tren_don LIKE ? OR mau LIKE ? OR mo_ta LIKE ? OR shop LIKE ?
                ORDER BY id DESC""" + ("" if unlimited else " LIMIT ?"),
-            (like,) * 6 + (() if unlimited else (limit,)),
+            (like,) * 9 + (() if unlimited else (limit,)),
         ).fetchall()
 
 
@@ -1782,6 +1806,65 @@ def add_address(text: str, user_id: int | None = None) -> int:
     if not text:
         raise ValueError("Địa chỉ trống")
     return insert("addresses", {"noi_dung": text}, user_id)
+
+
+# ---------- sổ shop (xuất VAT) ----------
+
+def list_shops() -> dict:
+    """{book: shop trong sổ + số đơn / số dòng sale cùng tên, seen: tên shop gặp ở đơn / sale nhưng chưa có trong sổ}."""
+    with connect() as conn:
+        book = [dict(r) for r in conn.execute("SELECT * FROM shops ORDER BY ten")]
+        used = {}
+        for table in ("orders", "sales"):
+            for r in conn.execute(f"SELECT name_key(shop) AS k, MIN(TRIM(shop)) AS ten, COUNT(*) AS n FROM {table} "
+                                  "WHERE TRIM(COALESCE(shop, '')) != '' GROUP BY name_key(shop)"):
+                u = used.setdefault(r["k"], {"ten": r["ten"], "orders": 0, "sales": 0})
+                u[table] = r["n"]
+    for b in book:
+        u = used.pop(b["ten_key"], {})
+        b["don"], b["sale"] = u.get("orders", 0), u.get("sales", 0)
+    seen = sorted(({"ten": u["ten"], "don": u["orders"], "sale": u["sales"]} for u in used.values()),
+                  key=lambda u: -(u["don"] + u["sale"]))
+    return {"book": book, "seen": seen}
+
+
+def save_shop(sid: int | None, ten: str, vat, ghi_chu: str = "") -> int:
+    """Thêm (sid None) / sửa 1 shop trong sổ. vat 1 / 0 / None. Trùng tên shop khác → ValueError.
+    Đổi tên shop trong sổ thì đổi luôn tên đó trên đơn / sale (giữ khớp)."""
+    ten = " ".join((ten or "").split())
+    if not ten:
+        raise ValueError("Thiếu tên shop")
+    key = name_key(ten)
+    vat = None if vat in (None, "") else (1 if str(vat) in ("1", "true", "True") else 0)
+    ghi_chu = (ghi_chu or "").strip() or None
+    with connect() as conn:
+        other = conn.execute("SELECT id FROM shops WHERE ten_key = ?", (key,)).fetchone()
+        if other and other["id"] != sid:
+            raise ValueError(f"Đã có shop “{ten}” trong sổ")
+        if sid is None:
+            return conn.execute("INSERT INTO shops (ten, ten_key, vat, ghi_chu, updated_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
+                                (ten, key, vat, ghi_chu, _now())).fetchone()[0]
+        old = conn.execute("SELECT ten_key FROM shops WHERE id = ?", (sid,)).fetchone()
+        if not old:
+            raise LookupError("Không tìm thấy shop")
+        conn.execute("UPDATE shops SET ten = ?, ten_key = ?, vat = ?, ghi_chu = ?, updated_at = ? WHERE id = ?",
+                     (ten, key, vat, ghi_chu, _now(), sid))
+        if old["ten_key"] != key:
+            for table in ("orders", "sales"):
+                conn.execute(f"UPDATE {table} SET shop = ? WHERE name_key(shop) = ?", (ten, old["ten_key"]))
+        return sid
+
+
+def delete_shop(sid: int) -> bool:
+    """Chỉ xóa khỏi sổ; tên shop trên đơn / sale giữ nguyên."""
+    with connect() as conn:
+        return conn.execute("DELETE FROM shops WHERE id = ?", (sid,)).rowcount > 0
+
+
+def shop_choices() -> list[str]:
+    """Tên shop để gợi ý khi gõ (sổ shop trước, rồi shop đã gặp ở đơn / sale)."""
+    d = list_shops()
+    return [b["ten"] for b in d["book"]] + [u["ten"] for u in d["seen"]]
 
 
 # ---------- sổ địa chỉ kho / bưu cục của hãng ----------

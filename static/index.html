@@ -1026,6 +1026,7 @@ async function viewOrders() {
     <div id="by-addr"></div>
     <div class="toolbar">
       <button class="btn" onclick="pickAll()">☑ Chọn tất cả đơn đang hiện</button>
+      <button class="btn" onclick="shopList()" title="Shop nào xuất hóa đơn VAT">🏪 Sổ shop</button>
       <button class="btn${state.groupAddr ? " primary" : ""}" title="Xếp thẻ đơn thành từng nhóm địa chỉ giống nhau (Ngõ 34 láng hạ = 12B 34 láng hạ, 10 lh = 10 láng hạ…)"
         onclick="state.groupAddr=!state.groupAddr;save();this.classList.toggle('primary',state.groupAddr);renderOrderCards()">🏠 Xếp theo địa chỉ</button>
       <span id="dc-filter"></span>
@@ -1315,6 +1316,25 @@ function milestoneText(o) {
   return `<span class="moc">${ms.map(([title, text], i) => `<span title="${esc(title)}">${text}${i < ms.length - 1
     ? '<i class="sep">·</i>' : ""}</span>`).join(" ")}</span>`;
 }
+// bảo hành từng đơn: ngày kích (bh_kich) + số tháng (bh_thang) → hết hạn, còn bao lâu
+function warranty(o) {
+  if (!o.bh_kich) return null;
+  const [y, m, d] = o.bh_kich.split("-").map(Number);
+  if (!o.bh_thang) return {from: o.bh_kich};
+  const last = new Date(y, m - 1 + o.bh_thang + 1, 0).getDate();  // ngày cuối tháng hết hạn (31/1 + 1 tháng → 28/2)
+  const end = ymd(new Date(y, m - 1 + o.bh_thang, Math.min(d, last)));
+  const left = Math.round((new Date(end + "T00:00") - new Date(ymd(new Date()) + "T00:00")) / 864e5);
+  return {from: o.bh_kich, end, left};
+}
+function warrantyText(o, long) {
+  const w = warranty(o);
+  if (!w) return "";
+  if (!w.end) return `🛡 kích BH ${dmy(w.from)}`;
+  const left = w.left < 0 ? "hết hạn" : w.left === 0 ? "hết hạn hôm nay" : w.left < 60 ? `còn ${w.left} ngày` : `còn ${Math.floor(w.left / 30)} tháng`;
+  const cls = w.left < 0 ? "b-cancel" : w.left <= 30 ? "b-ordered" : "b-done";
+  return long ? `kích ${dmy(w.from)} · ${o.bh_thang} tháng → hết hạn <b>${dmy(w.end)}</b> <span class="badge ${cls}">${left}</span>`
+    : `<span class="badge ${cls}" title="Kích bảo hành ${dmy(w.from)} · ${o.bh_thang} tháng">🛡 BH đến ${dmy(w.end)} · ${left}</span>`;
+}
 function orderCard(o) {
   const qty = o.so_luong > 1 ? ` <span class="badge b-accent">× ${o.so_luong}</span>` : "";
   const picked = state.picked.has(o.id);
@@ -1323,7 +1343,9 @@ function orderCard(o) {
     <div class="top"><label class="pick" onclick="event.stopPropagation()"><input type="checkbox" ${picked ? "checked" : ""}
         onchange="pickOrder(${o.id},this.checked)"><span class="id"><b>#${o.id}</b> : ${milestoneText(o)}</span></label>${stamp(o.trang_thai)}</div>
     <div class="title">${esc(o.ten_sp || "(chưa ghi sản phẩm)")}${qty}</div>
-    <div class="meta"><span>👤 ${esc(o.ten_nguoi_dat)}</span>${o.ten_tren_don ? `<span title="Tên trên đơn hàng">🪪 ${esc(o.ten_tren_don)}</span>` : ""}${o.chien_dich_ten ? `<span class="badge b-accent" title="Chiến dịch thưởng săn sale">🎁 ${esc(o.chien_dich_ten)}${o.cd_seq ? ` · đơn thứ ${o.cd_seq.n}` : ""}</span>` : ""}${o.cd_seq?.moc_dat ? milestoneBadge(o.cd_seq) : ""}${o.tach_tu ? `<span class="badge b-muted" title="Phần còn lại tách ra khi bán 1 phần đơn #${o.tach_tu}">✂️ tách từ #${o.tach_tu}</span>` : ""}${o.nguon_don ? sanTag(o.nguon_don) : ""}
+    ${o.mau || o.mo_ta || o.bh_kich ? `<div class="meta item-desc">${o.mau ? `<span title="Màu / phân loại">🎨 ${esc(o.mau)}</span>` : ""}${o.mo_ta
+      ? `<span class="muted" title="${esc(o.mo_ta)}">📝 ${esc(o.mo_ta.split("\n")[0].slice(0, 60))}${o.mo_ta.length > 60 || o.mo_ta.includes("\n") ? "…" : ""}</span>` : ""}${warrantyText(o)}</div>` : ""}
+    <div class="meta"><span>👤 ${esc(o.ten_nguoi_dat)}</span>${o.ten_tren_don ? `<span title="Tên trên đơn hàng">🪪 ${esc(o.ten_tren_don)}</span>` : ""}${o.chien_dich_ten ? `<span class="badge b-accent" title="Chiến dịch thưởng săn sale">🎁 ${esc(o.chien_dich_ten)}${o.cd_seq ? ` · đơn thứ ${o.cd_seq.n}` : ""}</span>` : ""}${o.cd_seq?.moc_dat ? milestoneBadge(o.cd_seq) : ""}${o.tach_tu ? `<span class="badge b-muted" title="Phần còn lại tách ra khi bán 1 phần đơn #${o.tach_tu}">✂️ tách từ #${o.tach_tu}</span>` : ""}${o.nguon_don ? sanTag(o.nguon_don) : ""}${o.shop ? `<span title="Shop đã mua">🏪 ${esc(o.shop)} ${vatBadge(o.shop)}</span>` : ""}
       ${o.nguon_khach ? `<span>📲 ${esc(o.nguon_khach)}</span>` : ""}${o.sdt ? `<span>📞 ${esc(o.sdt)}</span>` : ""}</div>
     ${o.dia_chi ? `<div class="addr" title="Địa chỉ">🏠 ${esc(o.dia_chi)}</div>` : ""}
     <div class="tear"></div>
@@ -1525,8 +1547,11 @@ async function orderDetail(id) {
     <div class="meta">${milestoneText(o)}${o.tach_tu ? ` · ✂️ tách từ đơn #${o.tach_tu} (bán 1 phần)` : ""}</div>
     <table style="margin-top:10px">
       ${row("Sản phẩm", esc(o.ten_sp) + (o.so_luong > 1 ? ` × ${o.so_luong}` : ""))}
+      ${row("Màu / phân loại", esc(o.mau || ""))}${row("Mô tả", o.mo_ta ? `<span style="white-space:pre-line">${esc(o.mo_ta)}</span>` : "")}
+      ${row("Bảo hành", warrantyText(o, true))}
       ${row("Người đặt", esc(o.ten_nguoi_dat))}${row("Tên trên đơn", esc(o.ten_tren_don || ""))}${row("Chiến dịch thưởng", o.chien_dich_ten ? "🎁 " + esc(o.chien_dich_ten) + (o.cd_seq ? ` · đơn thứ ${o.cd_seq.n}` : "") + (o.cd_seq?.moc_dat ? " " + milestoneBadge(o.cd_seq) : "") : "")}
       ${row("Nguồn", [o.nguon_khach, o.nguon_don].filter(Boolean).map(esc).join(" → "))}
+      ${row("Shop", o.shop ? `${esc(o.shop)} ${vatBadge(o.shop) || (shopOf(o.shop) ? "" : `<button class="btn xs" onclick="shopForm(0, ${jsq(o.shop)})">＋ Ghi VAT shop này</button>`)}` : "")}
       ${row("Giá đặt", money(o.gia_dat))}${row("Công đặt", money(o.cong_dat))}
       ${row("Giá shop thu", o.gia_thu ? money(o.gia_thu) + (o.so_luong > 1 ? ` <span class="meta">(${short(o.gia_thu / o.so_luong)}/cái)</span>` : "") : (o.gia_goi_y ? `<span class="meta">gợi ý ${esc(o.gia_goi_y)}/cái</span>` : ""))}
       ${row("Bonus thu", o.bonus_thu ? `+${money(o.bonus_thu)}` + (o.gia_thu ? ` <span class="meta">→ tổng thu ${money(o.thu)}</span>` : "") : "")}
@@ -1685,13 +1710,19 @@ function orderForm(id) {
   const o = id ? state.orders[id] : {};
   const m = state.meta, qty = o.so_luong || 1;
   const orig = {...o, gia_dat: o.gia_dat ? short(o.gia_dat) : "", cong_dat: o.cong_dat ? short(o.cong_dat) : "",
-                gia_thu: o.gia_thu ? short(o.gia_thu / qty) : "", bonus_thu: o.bonus_thu ? short(o.bonus_thu) : "", so_luong: o.so_luong ?? ""};
+                gia_thu: o.gia_thu ? short(o.gia_thu / qty) : "", bonus_thu: o.bonus_thu ? short(o.bonus_thu) : "", so_luong: o.so_luong ?? "",
+                bh_kich: o.bh_kich ? dmy(o.bh_kich) : "", bh_thang: o.bh_thang ?? ""};
   const fields = [
     ["ten_sp", "Tên sản phẩm", "text", orig.ten_sp, {list: m.products, full: true}],
     ["ten_nguoi_dat", "Người đặt *", "text", orig.ten_nguoi_dat, {list: m.people, hint: true}],
     ["so_luong", "Số lượng", "num", orig.so_luong, {ph: "1"}],
+    ["mau", "🎨 Màu / phân loại", "text", orig.mau, {ph: "vd Đen, 16GB/512GB, size L"}],
+    ["mo_ta", "📝 Mô tả chi tiết", "textarea", orig.mo_ta, {full: true, ph: "cấu hình, serial / IMEI, tình trạng, quà kèm…"}],
+    ["bh_kich", "🛡 Ngày kích bảo hành", "text", orig.bh_kich, {ph: "dd/mm/yyyy hoặc 27112026"}],
+    ["bh_thang", "🛡 Bảo hành bao nhiêu tháng", "num", orig.bh_thang, {ph: "vd 12, 24, 36"}],
     ["nguon_khach", "Nguồn khách", "text", orig.nguon_khach, {list: m.nguon_khach}],
     ["nguon_don", "Sàn", "text", orig.nguon_don, {list: m.nguon_don}],
+    ["shop", "🏪 Shop", "text", orig.shop, {list: m.shops, ph: "shop đã mua (có trong 🏪 Sổ shop → biết có VAT)"}],
     ["gia_dat", "Giá đặt", "money", orig.gia_dat, {ph: "vd 4tr3"}],
     ["cong_dat", "Công đặt", "money", orig.cong_dat, {ph: "vd 100k"}],
     ["gia_thu", qty > 1 ? `Giá shop thu 1 cái (× ${qty})` : "Giá shop thu", "money", orig.gia_thu, {qty, ph: o.gia_goi_y ? "gợi ý " + o.gia_goi_y : ""}],
@@ -1808,6 +1839,7 @@ function viewSales() {
       <button class="btn" onclick="setAllSales(0)">⛔ Tắt hết</button>
       <button class="btn" onclick="checkStock()">📦 Kiểm tra còn hàng</button>
       <button class="btn" id="stock-list" onclick="stockModal()">📋 Kết quả kiểm tra</button>
+      <button class="btn" onclick="shopList()" title="Shop nào xuất hóa đơn VAT">🏪 Sổ shop</button>
     </div>
     <div class="toolbar" id="sale-groups"></div>
     <div id="sales" class="grid cards">${skelCards()}</div>
@@ -1852,7 +1884,7 @@ function saleShopRow(s, price) {
   const laiOf = t => price && (t.gia_sale || t.gia_sale_max) ? mid(price.gia_goi_y, price.gia_goi_y_max) * qty - est(t.gia_sale, t.gia_sale_max) - est(t.cong, t.cong_max) : null;
   const lai = laiOf(s);
   return `<div class="shop ${s.active ? "" : "off"}">
-        <div class="line1"><span>🏪 <b>${esc(s.shop || "chưa ghi shop")}</b> <span class="meta" style="display:inline">#${s.id}</span>${s.uu_tien
+        <div class="line1"><span>🏪 <b>${esc(s.shop || "chưa ghi shop")}</b> ${vatBadge(s.shop)}<span class="meta" style="display:inline">#${s.id}</span>${s.uu_tien
             ? ` <span class="badge b-ordered" title="Thứ tự ưu tiên">🔝 ${s.uu_tien}</span>` : ""}${s.nhom
             ? ` <span class="badge b-muted" title="Nhóm sale (bot: /sale ${s.nhom})">🗂 nhóm ${s.nhom}</span>` : ""}${stockBadge(s)}</span>
           <label class="switch" title="${s.active ? "Đang sale" : "Hết sale"}"><input type="checkbox" ${s.active ? "checked" : ""}
@@ -2607,6 +2639,64 @@ function lastMilePost(p) {
     <details class="lm-orders"${state.lmQ ? " open" : ""}><summary>🧾 ${p.shown.length} đơn${p.shown.length < p.don ? ` / ${p.don}` : ""}</summary>
       <div class="scroll"><table>${items}</table></div></details>
   </div>`;
+}
+
+// ---------- sổ shop: shop có xuất hóa đơn VAT không (để sau chỉ mua ở shop xuất VAT) ----------
+const shopOf = name => { const k = foldText(name || "").replace(/\s+/g, " ").trim();
+  return k ? (state.meta.shop_book || []).find(b => foldText(b.ten).replace(/\s+/g, " ").trim() === k) : null; };
+function vatBadge(name) {
+  const b = shopOf(name);
+  if (!b || b.vat == null) return "";
+  return b.vat ? `<span class="badge b-done" title="Shop xuất hóa đơn VAT${b.ghi_chu ? " · " + esc(b.ghi_chu) : ""}">🧾 VAT</span>`
+    : `<span class="badge b-muted" title="Shop không xuất VAT${b.ghi_chu ? " · " + esc(b.ghi_chu) : ""}">🚫 VAT</span>`;
+}
+const VAT_LABEL = {1: "🧾 Có xuất VAT", 0: "🚫 Không xuất", null: "❔ Chưa rõ"};
+async function shopList(filter) {
+  if (filter !== undefined) state.shopFilter = filter;
+  const f = state.shopFilter ?? "all";
+  const d = await api("/shops");
+  state.shopBook = d;
+  const key = b => b.vat == null ? "null" : String(b.vat);
+  const book = d.book.filter(b => f === "all" || key(b) === f);
+  const cnt = v => d.book.filter(b => v === "all" || key(b) === v).length;
+  const segs = [["all", "Tất cả"], ["1", "🧾 Có VAT"], ["0", "🚫 Không"], ["null", "❔ Chưa rõ"]];
+  openModal(`${modalHead(`🏪 Sổ shop (${d.book.length})`)}
+    <div class="meta" style="margin-bottom:8px">Ghi shop nào xuất hóa đơn VAT. Đơn hàng và săn sale ghi đúng tên shop sẽ hiện 🧾 VAT / 🚫 VAT.</div>
+    <div class="seg" style="margin-bottom:8px">${segs.map(([v, t]) =>
+      `<button class="${f === v ? "on" : ""}" onclick="shopList('${v}')">${t} <small>${cnt(v)}</small></button>`).join("")}</div>
+    <div class="scroll"><table class="wh-list">${book.map(b => `<tr class="click" onclick="shopForm(${b.id})">
+        <td><b>${esc(b.ten)}</b>${b.ghi_chu ? `<div class="muted">${esc(b.ghi_chu)}</div>` : ""}</td>
+        <td style="white-space:nowrap">${VAT_LABEL[b.vat ?? null]}</td>
+        <td class="muted" style="white-space:nowrap">${b.don ? `${b.don} đơn` : ""}${b.don && b.sale ? " · " : ""}${b.sale ? `${b.sale} sale` : ""}</td></tr>`).join("")
+      || `<tr><td class="muted">Chưa có shop nào${f !== "all" ? " ở mục này" : ""}</td></tr>`}</table></div>
+    ${d.seen.length ? `<div class="meta" style="margin-top:10px">Shop đã gặp ở đơn / săn sale, chưa ghi vào sổ:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${d.seen.map(u =>
+        `<button class="btn xs" onclick="shopForm(0, ${jsq(u.ten)})">＋ ${esc(u.ten)}</button>`).join("")}</div>` : ""}
+    <div class="foot"><button class="btn" onclick="closeModal()">Đóng</button>
+      <button class="btn primary" onclick="shopForm(0)">＋ Thêm shop</button></div>`);
+}
+function shopForm(id, name) {
+  const b = id ? (state.shopBook?.book || []).find(x => x.id === id) || {} : {ten: name || "", vat: 1};
+  openModal(`${modalHead(id ? `✏️ Shop ${esc(b.ten)}` : "＋ Thêm shop vào sổ")}
+    <div class="form">
+      ${field(["ten", "Tên shop", "text", b.ten || "", {full: true, list: state.meta.shops || [], ph: "vd Abc Official Store"}])}
+      ${field(["vat", "Xuất hóa đơn VAT", "select", b.vat == null ? "" : String(b.vat), {full: true,
+        options: [["1", "🧾 Có xuất VAT"], ["0", "🚫 Không xuất VAT"], ["", "❔ Chưa rõ"]]}])}
+      ${field(["ghi_chu", "Ghi chú", "textarea", b.ghi_chu || "", {full: true, ph: "xuất VAT công ty / cá nhân, cần nhắn shop trước, mất bao lâu…"}])}
+    </div>
+    ${id ? '<div class="meta">Đổi tên ở đây thì tên shop trên các đơn / sale cũ cũng đổi theo.</div>' : ""}
+    <div class="foot">${id ? `<button class="btn bad left" onclick="deleteShop(${id})">🗑 Xóa</button>` : ""}
+      <button class="btn" onclick="shopList()">Hủy</button><button class="btn primary" onclick="saveShop(${id || 0})">Lưu</button></div>`);
+}
+async function saveShop(id) {
+  const b = formData();
+  if (!b.ten.trim()) { toast("Thiếu tên shop", true); return; }
+  if (id) await patch(`/shops/${id}`, b); else await post("/shops", b);
+  toast("💾 Đã lưu shop"); await refreshMeta(); shopList(); refresh(true);
+}
+async function deleteShop(id) {
+  if (!confirm("Xóa shop này khỏi sổ? (tên shop trên đơn / sale giữ nguyên)")) return;
+  await del(`/shops/${id}`); toast("🗑 Đã xóa khỏi sổ shop"); await refreshMeta(); shopList(); refresh(true);
 }
 
 // ---------- sổ địa chỉ kho / bưu cục của hãng (tên đúng như trong hành trình → địa chỉ thật) ----------
