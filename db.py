@@ -11,6 +11,7 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from urllib.parse import urlsplit
 
 import rpc
 import sale_text
@@ -446,6 +447,19 @@ CREATE TABLE IF NOT EXISTS sales (
     created_by  INTEGER,
     created_at  TEXT NOT NULL
 );
+
+-- link rút gọn (tab 🔗 Link): mở <web>/r/<ma> → 302 tới url (link affiliate / hoàn tiền dán tay)
+CREATE TABLE IF NOT EXISTS short_links (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ma          TEXT NOT NULL UNIQUE,      -- chữ thường a-z, số, - _
+    url         TEXT NOT NULL,             -- link đích (http / https), giữ nguyên tham số tracking
+    link_goc    TEXT,                      -- link gốc trong bài đăng đã đổi (tab 💸 Hoàn tiền), dùng lại mã khi dán lại
+    ghi_chu     TEXT,
+    luot_mo     INTEGER NOT NULL DEFAULT 0,
+    mo_cuoi     TEXT,                      -- lần mở gần nhất
+    created_by  TEXT,                      -- tài khoản web tạo
+    created_at  TEXT NOT NULL
+);
 """
 
 
@@ -706,6 +720,8 @@ def _init_db_full():
                          ("nguoi_dat_id", "INTEGER"), ("la_admin", "INTEGER NOT NULL DEFAULT 0")):
             if col not in alert_cols:
                 conn.execute(f"ALTER TABLE alert_users ADD COLUMN {col} {ddl}")
+        if "link_goc" not in table_columns(conn, "short_links"):
+            conn.execute("ALTER TABLE short_links ADD COLUMN link_goc TEXT")
         # bot alert không đọc .env nữa (token + telegram_id admin nhập ở tab 🤖 Bot alert): chép 1 lần cái đang có
         # trong .env (ALERT_BOT_TOKEN, ALERT_CHAT_IDS – trống thì ALLOWED_USER_IDS) vào bảng để alert không bị ngừng
         if not conn.execute("SELECT 1 FROM meta WHERE key = 'alert_env_imported'").fetchone():
@@ -1806,6 +1822,100 @@ def add_address(text: str, user_id: int | None = None) -> int:
     if not text:
         raise ValueError("Địa chỉ trống")
     return insert("addresses", {"noi_dung": text}, user_id)
+
+
+# ---------- link rút gọn (/r/<ma>) ----------
+
+SHORT_CODE_RE = re.compile(r"[a-z0-9][a-z0-9_-]{1,39}")
+_SHORT_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"  # bỏ chữ dễ nhầm (i l o 0 1)
+
+
+def short_link_url(url: str) -> str:
+    """Link đích hợp lệ: http / https, có tên miền, không khoảng trắng (giữ nguyên query tracking)."""
+    url = (url or "").strip()
+    if not url:
+        raise ValueError("Chưa dán link")
+    if "://" not in url:
+        url = "https://" + url
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname or any(c.isspace() for c in url):
+        raise ValueError("Link không hợp lệ (cần http:// hoặc https://)")
+    return url
+
+
+def list_short_links():
+    with connect() as conn:
+        return conn.execute("SELECT * FROM short_links ORDER BY id DESC").fetchall()
+
+
+def _new_short_code(conn) -> str:
+    for _ in range(20):
+        code = "".join(secrets.choice(_SHORT_ALPHABET) for _ in range(6))
+        if not conn.execute("SELECT 1 FROM short_links WHERE ma = ?", (code,)).fetchone():
+            return code
+    raise ValueError("Không tạo được mã mới – thử lại")
+
+
+def add_short_link(url: str, code: str | None = None, note: str | None = None, actor: str | None = None,
+                   original: str | None = None) -> int:
+    """Tạo link rút gọn; code trống → mã ngẫu nhiên 6 ký tự. original = link gốc trong bài đăng (tab Hoàn tiền)."""
+    url = short_link_url(url)
+    code = (code or "").strip().lower()
+    if code and not SHORT_CODE_RE.fullmatch(code):
+        raise ValueError("Mã chỉ gồm a-z, 0-9, - _ (2–40 ký tự, bắt đầu bằng chữ / số)")
+    with connect() as conn:
+        if code and conn.execute("SELECT 1 FROM short_links WHERE ma = ?", (code,)).fetchone():
+            raise ValueError(f"Mã {code} đã có – chọn mã khác")
+        return conn.execute("INSERT INTO short_links (ma, url, link_goc, ghi_chu, created_by, created_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+                            (code or _new_short_code(conn), url, (original or "").strip() or None,
+                             (note or "").strip() or None, actor, _now())).fetchone()[0]
+
+
+def convert_links(items: list[dict], actor: str | None = None) -> list[dict]:
+    """Tab 💸 Hoàn tiền: mỗi item {goc: link trong bài, url: link hoàn tiền (trống = chính link gốc), ghi_chu}.
+    Link gốc + link đích đã đổi lần trước → dùng lại mã cũ (dán lại cùng bài không sinh link mới).
+    Trả [{goc, ma, url, moi}] theo đúng thứ tự."""
+    if not items:
+        raise ValueError("Không có link nào để đổi")
+    if len(items) > 200:
+        raise ValueError("Tối đa 200 link mỗi lần")
+    rows = [(short_link_url(str(it.get("goc") or "")), str(it.get("url") or "").strip(), it.get("ghi_chu"))
+            for it in items]
+    out = []
+    with connect() as conn:
+        for goc, url, note in rows:
+            url = short_link_url(url) if url else goc
+            old = conn.execute("SELECT ma FROM short_links WHERE link_goc = ? AND url = ? ORDER BY id LIMIT 1",
+                               (goc, url)).fetchone()
+            if old:
+                out.append({"goc": goc, "ma": old[0], "url": url, "moi": False})
+                continue
+            code = _new_short_code(conn)
+            conn.execute("INSERT INTO short_links (ma, url, link_goc, ghi_chu, created_by, created_at) "
+                         "VALUES (?, ?, ?, ?, ?, ?)", (code, url, goc, (note or "").strip() or None, actor, _now()))
+            out.append({"goc": goc, "ma": code, "url": url, "moi": True})
+    return out
+
+
+def update_short_link(link_id: int, url: str, note: str | None) -> bool:
+    url = short_link_url(url)
+    with connect() as conn:
+        return conn.execute("UPDATE short_links SET url = ?, ghi_chu = ? WHERE id = ?",
+                            (url, (note or "").strip() or None, link_id)).rowcount > 0
+
+
+def delete_short_link(link_id: int) -> bool:
+    with connect() as conn:
+        return conn.execute("DELETE FROM short_links WHERE id = ?", (link_id,)).rowcount > 0
+
+
+def open_short_link(code: str) -> str | None:
+    """Người ngoài mở /r/<ma>: +1 lượt mở, trả link đích (None = không có mã)."""
+    with connect() as conn:
+        row = conn.execute("UPDATE short_links SET luot_mo = luot_mo + 1, mo_cuoi = ? WHERE ma = ? RETURNING url",
+                           (_now(), (code or "").strip().lower())).fetchone()
+    return row[0] if row else None
 
 
 # ---------- sổ shop (xuất VAT) ----------

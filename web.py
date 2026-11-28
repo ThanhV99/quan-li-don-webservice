@@ -235,9 +235,21 @@ async def bad_input(request: Request, e: ValueError):  # dữ liệu nhập sai 
 @app.get("/giao-hang")
 @app.get("/tai-khoan")
 @app.get("/bot-alert")
+@app.get("/hoan-tien")
 def index():
     html = (STATIC / "index.html").read_text(encoding="utf-8").replace("__APP_VERSION__", APP_VERSION, 1)
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/r/{code}")
+def short_redirect(code: str):
+    """Link rút gọn: ai mở cũng được (không cần đăng nhập) → 302 tới link đích, giữ nguyên tham số tracking."""
+    url = db.open_short_link(code) if db.SHORT_CODE_RE.fullmatch(code.lower()) else None
+    if not url:
+        return HTMLResponse("<meta charset=utf-8><p>Link không tồn tại hoặc đã bị xóa.</p>", status_code=404)
+    # chữ có dấu / ký tự lạ trong link → %XX (header chỉ nhận ASCII); %XX sẵn có giữ nguyên
+    return Response(status_code=302, headers={"Location": quote(url, safe=":/?#[]@!$&'()*+,;=%~"), "Cache-Control": "no-store",
+                                              "Referrer-Policy": "no-referrer-when-downgrade"})
 
 
 @app.get("/icons/{name}")
@@ -1197,6 +1209,44 @@ async def product_image(img_id: int):
 def delete_product_image(img_id: int):
     if not db.delete_product_image(img_id):
         raise HTTPException(404, "Không có ảnh")
+    return {"ok": True}
+
+
+# link rút gọn (tab 🔗 Link): dán link affiliate → <web>/r/<mã>; đặt trước PATCH / DELETE /api/{table}/{id} chung
+@app.get("/api/short-links")
+def short_links():
+    return [dict(r) for r in db.list_short_links()]
+
+
+@app.post("/api/short-links")
+async def create_short_link(request: Request):
+    body = await request.json()
+    link_id = db.add_short_link(str(body.get("url") or ""), str(body.get("ma") or ""), body.get("ghi_chu"),
+                                request.state.user["username"])
+    return next(dict(r) for r in db.list_short_links() if r["id"] == link_id)
+
+
+@app.post("/api/short-links/convert")
+async def convert_short_links(request: Request):
+    """Tab 💸 Hoàn tiền: {items: [{goc, url, ghi_chu}]} → [{goc, ma, url, moi}] (giao diện tự thay link trong bài)."""
+    items = (await request.json()).get("items") or []
+    if not isinstance(items, list) or not all(isinstance(x, dict) for x in items):
+        raise ValueError("Sai dữ liệu")
+    return db.convert_links(items, request.state.user["username"])
+
+
+@app.patch("/api/short-links/{link_id}")
+async def update_short_link(link_id: int, request: Request):
+    body = await request.json()
+    if not db.update_short_link(link_id, str(body.get("url") or ""), body.get("ghi_chu")):
+        raise HTTPException(404, "Không có link này")
+    return {"ok": True}
+
+
+@app.delete("/api/short-links/{link_id}")
+def delete_short_link(link_id: int):
+    if not db.delete_short_link(link_id):
+        raise HTTPException(404, "Không có link này")
     return {"ok": True}
 
 

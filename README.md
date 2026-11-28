@@ -99,6 +99,8 @@ cộng một độ lệch ngẫu nhiên (để các đơn không bị tra dồn 
 
 - `/api/*` cho giao diện: cần đăng nhập (cookie `qld_session`); `DELETE`, gộp người đặt, quản lý tài khoản chỉ admin.
   Mở không cần đăng nhập: `/api/login`, `/api/setup`, `/api/health`.
+- `/r/<mã>`: link rút gọn (tab 💸 Hoàn tiền `/hoan-tien`: dán cả bài đăng → tự tìm và đổi mọi link; bảng `short_links`), ai mở cũng được → 302 tới link đích (link affiliate /
+  hoàn tiền dán tay), đếm lượt mở. Tạo / sửa cần đăng nhập, xóa chỉ admin.
 - `/api/cron/shipments`: 1 lượt kiểm tra vận chuyển, cần token (xem trên).
 - `/api/svc/<module>.<hàm>` cho bot: header `X-Service-Token: <SERVICE_TOKEN>` (giống hệt bên bot), dữ liệu mã hóa theo `rpc.py`.
   Bot tải mã nguồn các module tính toán thuần (`utils`, `alert_rules`, `net`, `sale_text`, `tracking`, `track_text`) qua `<module>.__source__`

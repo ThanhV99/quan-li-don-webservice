@@ -74,6 +74,18 @@ tr.sku-on td { background: var(--ok-soft); font-weight: 600; }
 .addr-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 .addr-card .actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .addr-card .actions .muted { margin-right: auto; font-size: 12px; }
+.link-new { margin-bottom: 12px; }
+.link-new .form { margin-top: 0; }
+.link-new .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.link-new .actions .muted { margin-right: auto; font-size: 12px; }
+.addr-card a { overflow-wrap: anywhere; }
+.refund-text { min-height: 180px; font-family: inherit; }
+.refund-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; max-height: 420px; overflow: auto; }
+.refund-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: center;
+  padding: 8px; border: 1px solid var(--line, #ddd); border-radius: 10px; }
+.refund-goc { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; min-width: 0; }
+.refund-goc a { overflow-wrap: anywhere; font-size: 12px; }
+@media (max-width: 640px) { .refund-row { grid-template-columns: 1fr; } }
 .input::placeholder { color: var(--muted); opacity: .55; font-style: italic; }
 .input[readonly] { background: var(--bg); border-style: dashed; font-weight: 700; cursor: default; }
 .btn { border: 1px solid var(--line); background: var(--card); padding: 8px 14px; border-radius: 10px;
@@ -308,7 +320,7 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); }
 .campaign { border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
 .campaign .scroll { max-height: 300px; overflow: auto; }
 .campaign.off { opacity: .7; }
-body[data-role="user"] :is([onclick^="removeRec"], [onclick^="deleteQr"], [onclick^="deleteProductImage"], [onclick^="deleteWarehouse"], .merge-box) { display: none !important; }
+body[data-role="user"] :is([onclick^="removeRec"], [onclick^="removeShortLink"], [onclick^="deleteQr"], [onclick^="deleteProductImage"], [onclick^="deleteWarehouse"], .merge-box) { display: none !important; }
 #update-bar { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; gap: 10px; align-items: center;
   max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 12px; background: var(--card); border: 1px solid var(--accent);
   box-shadow: 0 6px 24px rgba(0,0,0,.18); font-size: 14px; }
@@ -755,7 +767,7 @@ async function changeMyPassword() {
 
 // ---------- điều hướng ----------
 const TABS = [["home", "🏠 Tổng quan"], ["orders", "🧾 Đơn hàng"], ["sales", "🔥 Săn sale"],
-              ["products", "🏷 Sản phẩm"], ["people", "👤 Người đặt"], ["phones", "📞 SĐT"], ["addresses", "📍 Địa chỉ"], ["lastmile", "🏍 Giao hàng"], ["users", "🔐 Tài khoản"], ["alertbot", "🤖 Bot alert"]];
+              ["products", "🏷 Sản phẩm"], ["people", "👤 Người đặt"], ["phones", "📞 SĐT"], ["addresses", "📍 Địa chỉ"], ["refund", "💸 Hoàn tiền"], ["lastmile", "🏍 Giao hàng"], ["users", "🔐 Tài khoản"], ["alertbot", "🤖 Bot alert"]];
 const ADMIN_TABS = ["users", "alertbot"];  // chỉ tài khoản admin thấy / vào được (server cũng chặn API)
 const state = {picked: new Map(), tab: "home", status: "Đã đặt", q: "", tu: "", den: "", month: null, saleAll: false, saleQ: "", saleGroup: "", meta: null, byPerson: false, byProduct: false, byBonus: false, byAddr: false, groupAddr: false};
 try { const {status, saleAll, saleGroup, byPerson, byProduct, byBonus, byAddr, groupAddr} = JSON.parse(localStorage.getItem("qld") || "{}"); Object.assign(state, {status: status || state.status, saleAll: !!saleAll, saleGroup: saleGroup || "", byPerson: !!byPerson, byProduct: !!byProduct, byBonus: !!byBonus, byAddr: !!byAddr, groupAddr: !!groupAddr}); } catch {}
@@ -763,7 +775,7 @@ const save = () => { try { localStorage.setItem("qld", JSON.stringify({status: s
 
 // mỗi tab 1 đường dẫn (web.py trả index.html cho các path này); bộ lọc nằm trong query: /don-hang?status=…&q=…, /?month=…
 const ROUTES = {home: "/", orders: "/don-hang", sales: "/san-sale", products: "/san-pham", people: "/nguoi-dat",
-                phones: "/sdt", addresses: "/dia-chi", lastmile: "/giao-hang", users: "/tai-khoan", alertbot: "/bot-alert"};
+                phones: "/sdt", addresses: "/dia-chi", refund: "/hoan-tien", lastmile: "/giao-hang", users: "/tai-khoan", alertbot: "/bot-alert"};
 function tabUrl(tab) {
   const qs = new URLSearchParams();
   if (tab === "orders") {
@@ -800,7 +812,7 @@ function render() {
     pageLoad((TABS.find(([k]) => k === state.tab) || [])[1]);
   }
   let r;
-  try { r = ({home: viewHome, orders: viewOrders, sales: viewSales, products: viewProducts, people: viewPeople, phones: viewPhones, addresses: viewAddresses, lastmile: viewLastMile, users: viewUsers, alertbot: viewAlertBot})[state.tab](); }
+  try { r = ({home: viewHome, orders: viewOrders, sales: viewSales, products: viewProducts, people: viewPeople, phones: viewPhones, addresses: viewAddresses, refund: viewRefund, lastmile: viewLastMile, users: viewUsers, alertbot: viewAlertBot})[state.tab](); }
   catch (e) { r = Promise.reject(e); }
   if (newTab) Promise.resolve(r).finally(() => { pageLoad.viewDone = true; pageLoad.check(); }).catch(() => {});
   Promise.resolve(r).catch(e => {
@@ -1822,7 +1834,7 @@ async function removeRec(table, id) {
   await del(`/${table}/${id}`); toast("🗑 Đã xóa"); closeModal(); refresh();
 }
 function refresh(keepModal) {
-  const fn = {home: viewHome, orders: loadOrders, sales: loadSales, products: viewProducts, people: viewPeople, phones: viewPhones, addresses: loadAddresses, lastmile: viewLastMile, users: viewUsers, alertbot: viewAlertBot}[state.tab];
+  const fn = {home: viewHome, orders: loadOrders, sales: loadSales, products: viewProducts, people: viewPeople, phones: viewPhones, addresses: loadAddresses, refund: loadShortLinks, lastmile: viewLastMile, users: viewUsers, alertbot: viewAlertBot}[state.tab];
   fn && fn();
 }
 
@@ -2798,6 +2810,148 @@ async function saveAddress(id) {
   if (!b.noi_dung.trim()) { toast("Địa chỉ trống", true); return; }
   if (id) await patch(`/addresses/${id}`, b); else await post("/addresses", b);
   toast("✏️ Đã lưu"); closeModal(); loadAddresses();
+}
+// ---------- link rút gọn: dán link affiliate / hoàn tiền → <web>/r/<mã> (302 tới link gốc) ----------
+const shortUrl = ma => `${location.origin}/r/${ma}`;
+// bài mẫu để thử tab 💸 Hoàn tiền (bấm 🧪 Ví dụ)
+const REFUND_SAMPLE = `TIKTOKSHOP
+➖RAM D50 2tr1
+https://vt.tiktok.com/ZS9PnyqhsBK2n-t8lYv/
+➖TUF B760M plus wifi D4 2tr5
+https://vt.tiktok.com/ZS9PsrJA3WJ27-REBXB/
+➖14400F 2tr2
+https://vt.tiktok.com/ZS9Psr8fvjHyo-nZOA7/
+https://vt.tiktok.com/ZS9PsmRN4QxXw-IdhGz/
+SHOPEE
+➖12400F 2tr
+https://s.shopee.vn/8pngIFcxNG
+🔺Sếp TRƯỜNG GIANG thu
+14400F 2329k thu 2550k
+https://vt.tiktok.com/ZS9PnfRtt1BRP-61r56/`;
+const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
+const trimUrl = u => u.replace(/[.,;:!?)\]}»”’]+$/, "");
+const linkSite = u => /shopee|shope\.ee/i.test(u) ? "Shopee" : /tiktok/i.test(u) ? "TikTok" : "Khác";
+// link trong bài (không trùng, theo thứ tự) + dòng chữ gần nhất phía trên làm ghi chú (tên sản phẩm / giá)
+function findLinks(text) {
+  const out = new Map();
+  let note = "";
+  for (const line of text.split("\n")) {
+    const urls = (line.match(URL_RE) || []).map(trimUrl);
+    const rest = line.replace(URL_RE, "").replace(/^[\s➖🔺•\-–]+/u, "").trim();
+    if (rest) note = rest;
+    for (const u of urls) if (!out.has(u)) out.set(u, {goc: u, note, site: linkSite(u)});
+  }
+  return [...out.values()];
+}
+function viewRefund() {
+  const r = state.refund ||= {text: "", found: [], out: ""};
+  $("#view").innerHTML = `
+    <div class="card link-new">
+      <h3 style="margin:0 0 6px">💸 Đổi link trong bài đăng</h3>
+      <div class="muted" style="font-size:13px">Dán cả bài (Shopee <code>s.shopee.vn/…</code>, TikTok <code>vt.tiktok.com/…</code>…) →
+        web tự tìm link, đổi thành link rút gọn <code>${esc(location.origin)}/r/…</code> trỏ tới link hoàn tiền bạn dán
+        (để trống = trỏ về chính link gốc). Dán lại cùng bài thì dùng lại mã cũ.</div>
+      <div class="form"><label class="full">Bài đăng
+        <textarea class="input refund-text" id="refund-in" placeholder="Dán bài đăng có link…"
+          oninput="state.refund.text=this.value;clearTimeout(this._t);this._t=setTimeout(scanRefund,250)">${esc(r.text)}</textarea></label></div>
+      <div class="actions"><span class="muted" id="refund-count"></span>
+        <button class="btn" onclick="refundSample()">🧪 Ví dụ</button>
+        <button class="btn" onclick="state.refund={text:'',found:[],out:''};viewRefund()">✕ Xóa</button></div>
+      <div id="refund-links"></div>
+      <div id="refund-out"></div>
+    </div>
+    <h3 style="margin:16px 0 8px">🔗 Link đã tạo</h3>
+    <div class="toolbar">
+      <input class="input grow" placeholder="🔍 Tìm mã / link / ghi chú…" value="${esc(state.slQ || "")}"
+        oninput="clearTimeout(this._t);this._t=setTimeout(()=>{state.slQ=this.value;renderShortLinks()},200)">
+      <span class="meta" id="sl-count"></span></div>
+    <div id="short-links" class="grid cards">${skelCards()}</div>`;
+  scanRefund(true);
+  return loadShortLinks();
+}
+function refundSample() {
+  state.refund = {text: REFUND_SAMPLE, found: [], out: ""};
+  viewRefund();
+}
+// đọc lại link trong bài; giữ link hoàn tiền / dấu tích đã nhập của link vẫn còn trong bài
+function scanRefund(keepOut) {
+  const r = state.refund, old = new Map(r.found.map(f => [f.goc, f]));
+  r.found = findLinks(r.text).map(f => ({...f, on: true, url: "", ...(old.has(f.goc) ? {on: old.get(f.goc).on, url: old.get(f.goc).url} : {})}));
+  if (!keepOut) r.out = "";
+  const n = r.found.length;
+  $("#refund-count").textContent = r.text.trim() ? `Tìm thấy ${n} link (${["Shopee", "TikTok", "Khác"].map(s => [s, r.found.filter(f => f.site === s).length]).filter(x => x[1]).map(x => `${x[1]} ${x[0]}`).join(", ") || "0"})` : "";
+  $("#refund-links").innerHTML = n ? `
+    <div class="refund-list">${r.found.map((f, i) => `
+      <div class="refund-row">
+        <label class="refund-goc"><input type="checkbox" ${f.on ? "checked" : ""} onchange="state.refund.found[${i}].on=this.checked">
+          <span class="badge ${f.site === "Shopee" ? "b-ordered" : f.site === "TikTok" ? "b-accent" : "b-muted"}">${f.site}</span>
+          <span><b>${esc(f.note || "—")}</b><br><a href="${esc(f.goc)}" target="_blank" rel="noopener" class="muted">${esc(f.goc)}</a></span></label>
+        <input class="input" placeholder="Link hoàn tiền (trống = link gốc)" value="${esc(f.url)}"
+          oninput="state.refund.found[${i}].url=this.value.trim()">
+      </div>`).join("")}</div>
+    <div class="actions"><span class="muted">Bỏ tích = giữ nguyên link đó trong bài</span>
+      <button class="btn primary" onclick="convertRefund(this)">🔗 Đổi link (${n})</button></div>` : "";
+  renderRefundOut();
+}
+function renderRefundOut() {
+  const out = state.refund.out;
+  $("#refund-out").innerHTML = out ? `
+    <div class="form"><label class="full">Bài đã đổi link
+      <textarea class="input refund-text" readonly>${esc(out)}</textarea></label></div>
+    <div class="actions"><span class="muted"></span>
+      <button class="btn primary" onclick="copyText(state.refund.out)">📋 Chép bài</button></div>` : "";
+}
+async function convertRefund(btn) {
+  const r = state.refund, picked = r.found.filter(f => f.on);
+  if (!picked.length) { toast("Chưa tích link nào", true); return; }
+  btn.disabled = true;
+  try {
+    const res = await post("/short-links/convert", {items: picked.map(f => ({goc: f.goc, url: f.url, ghi_chu: f.note}))});
+    const map = new Map(res.map(x => [x.goc, shortUrl(x.ma)]));
+    // thay đúng link đã tích, giữ dấu câu dính sau link
+    r.out = r.text.replace(URL_RE, m => { const u = trimUrl(m); return map.has(u) ? map.get(u) + m.slice(u.length) : m; });
+    renderRefundOut();
+    await copyText(r.out);
+    const moi = res.filter(x => x.moi).length;
+    toast(`🔗 Đã đổi ${res.length} link (${moi} mới, ${res.length - moi} dùng lại) – đã chép bài`);
+    loadShortLinks();
+  } finally { btn.disabled = false; }
+}
+async function loadShortLinks() {
+  if (!$("#short-links")) return viewRefund();
+  state.shortLinks = await api("/short-links");
+  renderShortLinks();
+}
+function renderShortLinks() {
+  const list = state.shortLinks || [], kw = (state.slQ || "").trim().toLowerCase();
+  const shown = kw ? list.filter(l => [l.ma, l.url, l.link_goc, l.ghi_chu].some(x => (x || "").toLowerCase().includes(kw))) : list;
+  $("#sl-count").textContent = `${list.length} link`;
+  $("#short-links").innerHTML = shown.map(l => `
+    <div class="card addr-card">
+      <div><b><a href="${esc(shortUrl(l.ma))}" target="_blank" rel="noopener">${esc(shortUrl(l.ma))}</a></b>
+        ${l.ghi_chu ? `<div>${esc(l.ghi_chu)}</div>` : ""}
+        <div class="addr-text muted">→ ${esc(l.url)}${l.link_goc && l.link_goc !== l.url ? `<br>gốc: ${esc(l.link_goc)}` : ""}</div></div>
+      <div class="actions"><span class="muted">👁 ${l.luot_mo} lượt mở${l.mo_cuoi ? ` · lần cuối ${dt(l.mo_cuoi)}` : ""} · ${dt(l.created_at)}${l.created_by ? ` · ${esc(l.created_by)}` : ""}</span>
+        <button class="btn sm" onclick="copyText(shortUrl('${esc(l.ma)}'))">📋 Chép</button>
+        <button class="btn sm" onclick="shortLinkForm(${l.id})">✏️ Sửa</button></div>
+    </div>`).join("") || `<div class="empty">${kw ? "Không có link nào khớp" : "Chưa có link nào – dán bài ở trên rồi bấm 🔗 Đổi link"}</div>`;
+}
+function shortLinkForm(id) {
+  const l = (state.shortLinks || []).find(x => x.id === id);
+  if (!l) return;
+  openModal(`${modalHead(`✏️ Link /r/${esc(l.ma)}`)}
+    <div class="form addr-form">${field(["url", "Link đích (link hoàn tiền)", "textarea", l.url, {full: true}])}
+      ${field(["ghi_chu", "Ghi chú", "text", l.ghi_chu || "", {full: true}])}</div>
+    <div class="foot"><button class="btn bad left" onclick="removeShortLink(${id})">🗑 Xóa</button>
+      <button class="btn" onclick="closeModal()">Hủy</button><button class="btn primary" onclick="saveShortLink(${id})">Lưu</button></div>`);
+}
+async function saveShortLink(id) {
+  await patch(`/short-links/${id}`, formData());
+  toast("✏️ Đã lưu"); closeModal(); loadShortLinks();
+}
+async function removeShortLink(id) {
+  if (!confirm("Xóa link này? Ai đang giữ link rút gọn sẽ không mở được nữa.")) return;
+  await del(`/short-links/${id}`); toast("🗑 Đã xóa"); closeModal(); loadShortLinks();
 }
 // chép chữ: clipboard API cần https / localhost → web chạy http trong mạng LAN thì dùng cách cũ (execCommand)
 async function copyText(text) {
