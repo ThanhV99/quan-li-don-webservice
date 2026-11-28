@@ -79,7 +79,12 @@ tr.sku-on td { background: var(--ok-soft); font-weight: 600; }
 .link-new .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .link-new .actions .muted { margin-right: auto; font-size: 12px; }
 .addr-card a { overflow-wrap: anywhere; }
-.refund-text { min-height: 180px; font-family: inherit; }
+.refund-io { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.refund-io > label, .refund-io > div > label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 500; }
+.refund-text { min-height: 60vh; font-family: inherit; font-size: 14px; line-height: 1.5; resize: vertical; }
+.refund-result { white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: 80vh; color: var(--text, inherit); font-weight: 400; }
+.refund-result mark { background: var(--accent-soft); color: var(--accent); border-radius: 4px; padding: 0 2px; }
+@media (max-width: 760px) { .refund-io { grid-template-columns: 1fr; } .refund-text { min-height: 45vh; } }
 .refund-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; max-height: 420px; overflow: auto; }
 .refund-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: center;
   padding: 8px; border: 1px solid var(--line, #ddd); border-radius: 10px; }
@@ -2851,14 +2856,16 @@ function viewRefund() {
       <div class="muted" style="font-size:13px">Dán cả bài (Shopee <code>s.shopee.vn/…</code>, TikTok <code>vt.tiktok.com/…</code>…) →
         web tự tìm link, đổi thành link rút gọn <code>${esc(location.origin)}/r/…</code> trỏ tới link hoàn tiền bạn dán
         (để trống = trỏ về chính link gốc). Dán lại cùng bài thì dùng lại mã cũ.</div>
-      <div class="form"><label class="full">Bài đăng
-        <textarea class="input refund-text" id="refund-in" placeholder="Dán bài đăng có link…"
-          oninput="state.refund.text=this.value;clearTimeout(this._t);this._t=setTimeout(scanRefund,250)">${esc(r.text)}</textarea></label></div>
+      <div class="refund-io">
+        <label>Bài đăng gốc
+          <textarea class="input refund-text" id="refund-in" placeholder="Dán bài đăng có link…"
+            oninput="state.refund.text=this.value;clearTimeout(this._t);this._t=setTimeout(scanRefund,250)">${esc(r.text)}</textarea></label>
+        <div id="refund-out"></div>
+      </div>
       <div class="actions"><span class="muted" id="refund-count"></span>
         <button class="btn" onclick="refundSample()">🧪 Ví dụ</button>
         <button class="btn" onclick="state.refund={text:'',found:[],out:''};viewRefund()">✕ Xóa</button></div>
       <div id="refund-links"></div>
-      <div id="refund-out"></div>
     </div>
     <h3 style="margin:16px 0 8px">🔗 Link đã tạo</h3>
     <div class="toolbar">
@@ -2893,13 +2900,15 @@ function scanRefund(keepOut) {
       <button class="btn primary" onclick="convertRefund(this)">🔗 Đổi link (${n})</button></div>` : "";
   renderRefundOut();
 }
+// bài đã đổi: giữ nguyên từng chữ / dòng / emoji của bài gốc, chỉ link đã đổi được tô màu
 function renderRefundOut() {
   const out = state.refund.out;
-  $("#refund-out").innerHTML = out ? `
-    <div class="form"><label class="full">Bài đã đổi link
-      <textarea class="input refund-text" readonly>${esc(out)}</textarea></label></div>
-    <div class="actions"><span class="muted"></span>
-      <button class="btn primary" onclick="copyText(state.refund.out)">📋 Chép bài</button></div>` : "";
+  const mine = new RegExp(`${location.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/r/[a-z0-9_-]+`, "g");
+  $("#refund-out").innerHTML = `<label>Bài đã đổi link
+    ${out ? `<div class="input refund-text refund-result">${esc(out).replace(mine, m => `<mark>${m}</mark>`)}</div>`
+      : `<div class="input refund-text refund-result muted">Bấm 🔗 Đổi link – bài sau khi đổi hiện ở đây (chỉ thay link, nội dung khác giữ nguyên)</div>`}</label>
+    ${out ? `<div class="actions"><span class="muted"></span>
+      <button class="btn primary" onclick="copyText(state.refund.out)">📋 Chép bài</button></div>` : ""}`;
 }
 async function convertRefund(btn) {
   const r = state.refund, picked = r.found.filter(f => f.on);
